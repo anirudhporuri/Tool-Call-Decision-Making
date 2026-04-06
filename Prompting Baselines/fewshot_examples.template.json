@@ -1,0 +1,46 @@
+[
+  {
+    "id": "EX1_TOOL_CALL_PLACEHOLDER",
+    "category": "tool_call",
+    "question": "PASTE_A_REAL_train_sft_USER_QUESTION_HERE",
+    "tools": [
+      {
+        "name": "PASTE_REAL_TOOL_SPEC_HERE"
+      }
+    ],
+    "answer": "<TOOLCALL>[{\"name\": \"real_tool_name\", \"arguments\": {\"arg1\": \"value1\"}}]</TOOLCALL>"
+  },
+  {
+    "id": "EX2_TOOL_CALL_PLACEHOLDER",
+    "category": "tool_call",
+    "question": "PASTE_A_SECOND_REAL_train_sft_USER_QUESTION_HERE",
+    "tools": [
+      {
+        "name": "PASTE_REAL_TOOL_SPEC_HERE"
+      }
+    ],
+    "answer": "<TOOLCALL>[{\"name\": \"real_tool_name\", \"arguments\": {\"arg1\": \"value1\"}}]</TOOLCALL>"
+  },
+  {
+    "id": "EX3_REQUEST_FOR_INFO_PLACEHOLDER",
+    "category": "request_for_info",
+    "question": "PASTE_A_REAL_train_sft_USER_QUESTION_HERE",
+    "tools": [
+      {
+        "name": "PASTE_REAL_TOOL_SPEC_HERE"
+      }
+    ],
+    "answer": "PASTE_THE_REAL_ASSISTANT_RESPONSE_TEXT_HERE"
+  },
+  {
+    "id": "EX4_CANNOT_ANSWER_PLACEHOLDER",
+    "category": "cannot_answer",
+    "question": "PASTE_A_REAL_train_sft_USER_QUESTION_HERE",
+    "tools": [
+      {
+        "name": "PASTE_REAL_TOOL_SPEC_HERE"
+      }
+    ],
+    "answer": "PASTE_THE_REAL_ASSISTANT_RESPONSE_TEXT_HERE"
+  }
+]
