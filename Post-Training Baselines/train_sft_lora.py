@@ -343,14 +343,23 @@ def main(argv: Optional[List[str]] = None) -> None:
         load_best_model_at_end=False,
     )
 
-    trainer = Trainer(
-        model=model,
-        args=train_args,
-        train_dataset=tokenized_train,
-        eval_dataset=tokenized_eval,
-        data_collator=SupervisedDataCollator(tokenizer),
-        tokenizer=tokenizer,
-    )
+    trainer_kwargs = {
+        "model": model,
+        "args": train_args,
+        "train_dataset": tokenized_train,
+        "eval_dataset": tokenized_eval,
+        "data_collator": SupervisedDataCollator(tokenizer),
+    }
+    try:
+        trainer = Trainer(
+            processing_class=tokenizer,
+            **trainer_kwargs,
+        )
+    except TypeError:
+        trainer = Trainer(
+            tokenizer=tokenizer,
+            **trainer_kwargs,
+        )
     train_result = trainer.train()
     trainer.save_model()
     tokenizer.save_pretrained(out_dir)
