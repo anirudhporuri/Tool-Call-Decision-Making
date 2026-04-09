@@ -26,6 +26,7 @@ class EncodedExample:
     input_ids: List[int]
     attention_mask: List[int]
     labels: List[int]
+    token_type_ids: Optional[List[int]] = None
 
 
 def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
@@ -145,7 +146,13 @@ def maybe_limit_dataset(dataset: Dataset, limit: Optional[int]) -> Dataset:
     return dataset.select(range(min(limit, len(dataset))))
 
 
-def encode_example(tokenizer, prompt: str, target: str, max_length: int) -> EncodedExample:
+def encode_example(
+    tokenizer,
+    prompt: str,
+    target: str,
+    max_length: int,
+    include_token_type_ids: bool = False,
+) -> EncodedExample:
     prompt_ids = tokenizer(prompt, add_special_tokens=False).input_ids
     target_ids = tokenizer(target, add_special_tokens=False).input_ids
     eos_id = tokenizer.eos_token_id
@@ -161,7 +168,13 @@ def encode_example(tokenizer, prompt: str, target: str, max_length: int) -> Enco
         labels = labels[overflow:]
 
     attention_mask = [1] * len(input_ids)
-    return EncodedExample(input_ids=input_ids, attention_mask=attention_mask, labels=labels)
+    token_type_ids = [0] * len(input_ids) if include_token_type_ids else None
+    return EncodedExample(
+        input_ids=input_ids,
+        attention_mask=attention_mask,
+        labels=labels,
+        token_type_ids=token_type_ids,
+    )
 
 
 class SupervisedDataCollator:
@@ -177,11 +190,18 @@ class SupervisedDataCollator:
         input_ids = pad_sequence(input_ids, batch_first=True, padding_value=pad_id)
         attention_mask = pad_sequence(attention_mask, batch_first=True, padding_value=0)
         labels = pad_sequence(labels, batch_first=True, padding_value=-100)
-        return {
+        batch = {
             "input_ids": input_ids,
             "attention_mask": attention_mask,
             "labels": labels,
         }
+        if any(f.get("token_type_ids") is not None for f in features):
+            token_type_ids = [
+                torch.tensor(f.get("token_type_ids") or [0] * len(f["input_ids"]), dtype=torch.long)
+                for f in features
+            ]
+            batch["token_type_ids"] = pad_sequence(token_type_ids, batch_first=True, padding_value=0)
+        return batch
 
 
 def format_dataset(dataset: Dataset, model_family: str, desc: str) -> Dataset:
@@ -192,11 +212,25 @@ def format_dataset(dataset: Dataset, model_family: str, desc: str) -> Dataset:
     )
 
 
-def tokenize_dataset(dataset: Optional[Dataset], tokenizer, max_length: int, desc: str) -> Optional[Dataset]:
+def tokenize_dataset(
+    dataset: Optional[Dataset],
+    tokenizer,
+    max_length: int,
+    desc: str,
+    include_token_type_ids: bool = False,
+) -> Optional[Dataset]:
     if dataset is None:
         return None
     return dataset.map(
-        lambda row: asdict(encode_example(tokenizer, row["prompt"], row["target"], max_length)),
+        lambda row: asdict(
+            encode_example(
+                tokenizer,
+                row["prompt"],
+                row["target"],
+                max_length,
+                include_token_type_ids=include_token_type_ids,
+            )
+        ),
         remove_columns=dataset.column_names,
         desc=desc,
     )
@@ -290,8 +324,21 @@ def main(argv: Optional[List[str]] = None) -> None:
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
-    tokenized_train = tokenize_dataset(processed_train, tokenizer, args.max_length, "Tokenizing train data")
-    tokenized_eval = tokenize_dataset(processed_eval, tokenizer, args.max_length, "Tokenizing eval data")
+    include_token_type_ids = args.model_family == "gemma"
+    tokenized_train = tokenize_dataset(
+        processed_train,
+        tokenizer,
+        args.max_length,
+        "Tokenizing train data",
+        include_token_type_ids=include_token_type_ids,
+    )
+    tokenized_eval = tokenize_dataset(
+        processed_eval,
+        tokenizer,
+        args.max_length,
+        "Tokenizing eval data",
+        include_token_type_ids=include_token_type_ids,
+    )
 
     model = AutoModelForCausalLM.from_pretrained(
         args.model_name_or_path,
