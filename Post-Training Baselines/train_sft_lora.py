@@ -3,16 +3,13 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import torch
-from datasets import Dataset, load_dataset
-from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
+from datasets import Dataset, load_dataset, load_from_disk
 from torch.nn.utils.rnn import pad_sequence
-from torch.utils.data import DataLoader
 from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
@@ -31,21 +28,28 @@ class EncodedExample:
     labels: List[int]
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Train LoRA SFT on When2Call train_sft.")
     p.add_argument("--model_name_or_path", type=str, required=True)
     p.add_argument("--model_family", type=str, choices=["llama", "gemma"], required=True)
     p.add_argument("--output_dir", type=str, required=True)
     p.add_argument("--hf_token", type=str, default=None)
     p.add_argument("--dataset_name", type=str, default="nvidia/When2Call")
-    p.add_argument("--dataset_config", type=str, default="train")
-    p.add_argument("--dataset_split", type=str, default="sft")
+    p.add_argument("--dataset_config", type=str, default="train_sft")
+    p.add_argument("--dataset_split", type=str, default="train")
+    p.add_argument(
+        "--dataset_dir",
+        type=str,
+        default=None,
+        help="Explicit directory used to persist downloaded datasets for reuse across runs.",
+    )
     p.add_argument("--train_file", type=str, default=None)
     p.add_argument("--val_size", type=float, default=0.02)
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--max_train_samples", type=int, default=None)
     p.add_argument("--max_eval_samples", type=int, default=None)
     p.add_argument("--max_length", type=int, default=2048)
+    p.add_argument("--max_steps", type=int, default=-1)
     p.add_argument("--per_device_train_batch_size", type=int, default=2)
     p.add_argument("--per_device_eval_batch_size", type=int, default=2)
     p.add_argument("--gradient_accumulation_steps", type=int, default=8)
@@ -72,7 +76,8 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument("--report_to", type=str, default="none")
     p.add_argument("--trust_remote_code", action="store_true")
-    return p.parse_args()
+    p.add_argument("--dry_run", action="store_true")
+    return p.parse_args(argv)
 
 
 def ensure_dir(path: str | Path) -> Path:
@@ -81,21 +86,44 @@ def ensure_dir(path: str | Path) -> Path:
     return p
 
 
+def save_json(path: str | Path, payload: Dict[str, Any]) -> None:
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2)
+
+
+def safe_dataset_slug(*parts: str) -> str:
+    return "__".join(part.replace("/", "__") for part in parts if part)
+
+
 def get_dtype(name: str) -> torch.dtype:
     return {
         "float16": torch.float16,
         "bfloat16": torch.bfloat16,
         "float32": torch.float32,
     }[name]
-
-
-
-
 def load_source_dataset(args: argparse.Namespace):
+    cache_dir = None
+    if args.dataset_dir:
+        cache_dir = str(ensure_dir(Path(args.dataset_dir) / "_hf_cache"))
+
     if args.train_file:
-        ds = load_dataset("json", data_files=args.train_file)["train"]
+        ds = load_dataset("json", data_files=args.train_file, cache_dir=cache_dir)["train"]
     else:
-        ds = load_dataset(args.dataset_name, args.dataset_config)[args.dataset_split]
+        if args.dataset_dir:
+            dataset_root = ensure_dir(args.dataset_dir)
+            snapshot_dir = dataset_root / safe_dataset_slug(args.dataset_name, args.dataset_config)
+            if snapshot_dir.exists():
+                dataset_obj = load_from_disk(str(snapshot_dir))
+            else:
+                dataset_obj = load_dataset(
+                    args.dataset_name,
+                    args.dataset_config,
+                    cache_dir=cache_dir,
+                )
+                dataset_obj.save_to_disk(str(snapshot_dir))
+            ds = dataset_obj[args.dataset_split]
+        else:
+            ds = load_dataset(args.dataset_name, args.dataset_config)[args.dataset_split]
     return ds
 
 
@@ -109,6 +137,12 @@ def train_eval_split(ds, val_size: float, seed: int):
 def preprocess_row(row: Dict[str, Any], model_family: str) -> Dict[str, str]:
     prompt, target = format_sft_example(model_family=model_family, row=row)
     return {"prompt": prompt, "target": target}
+
+
+def maybe_limit_dataset(dataset: Dataset, limit: Optional[int]) -> Dataset:
+    if limit is None:
+        return dataset
+    return dataset.select(range(min(limit, len(dataset))))
 
 
 def encode_example(tokenizer, prompt: str, target: str, max_length: int) -> EncodedExample:
@@ -150,43 +184,103 @@ class SupervisedDataCollator:
         }
 
 
+def format_dataset(dataset: Dataset, model_family: str, desc: str) -> Dataset:
+    return dataset.map(
+        lambda row: preprocess_row(row, model_family),
+        remove_columns=dataset.column_names,
+        desc=desc,
+    )
+
+
+def tokenize_dataset(dataset: Optional[Dataset], tokenizer, max_length: int, desc: str) -> Optional[Dataset]:
+    if dataset is None:
+        return None
+    return dataset.map(
+        lambda row: asdict(encode_example(tokenizer, row["prompt"], row["target"], max_length)),
+        remove_columns=dataset.column_names,
+        desc=desc,
+    )
+
+
+def build_quant_config(args: argparse.Namespace) -> Optional[BitsAndBytesConfig]:
+    if not args.load_in_4bit:
+        return None
+    return BitsAndBytesConfig(
+        load_in_4bit=True,
+        bnb_4bit_quant_type="nf4",
+        bnb_4bit_compute_dtype=get_dtype(args.dtype),
+        bnb_4bit_use_double_quant=True,
+    )
+
+
 def save_preview(dataset: Dataset, path: Path, n: int = 20) -> None:
     with open(path, "w", encoding="utf-8") as f:
         for i in range(min(n, len(dataset))):
             f.write(json.dumps(dataset[i], ensure_ascii=False) + "\n")
 
 
-def main() -> None:
-    args = parse_args()
+def write_dry_run_summary(
+    *,
+    out_dir: Path,
+    train_examples: int,
+    eval_examples: int,
+    train_preview_path: Path,
+    eval_preview_path: Optional[Path],
+) -> Dict[str, Any]:
+    summary = {
+        "mode": "dry_run",
+        "model_loaded": False,
+        "tokenizer_loaded": False,
+        "train_examples_previewed": train_examples,
+        "eval_examples_previewed": eval_examples,
+        "saved_train_preview": str(train_preview_path),
+        "saved_eval_preview": str(eval_preview_path) if eval_preview_path is not None else None,
+        "checks_completed": [
+            "dataset_loading",
+            "train_eval_split",
+            "prompt_formatting",
+            "preview_writes",
+        ],
+    }
+    with open(out_dir / "dry_run_summary.json", "w", encoding="utf-8") as f:
+        json.dump(summary, f, indent=2)
+    return summary
+
+
+def main(argv: Optional[List[str]] = None) -> None:
+    args = parse_args(argv)
     out_dir = ensure_dir(args.output_dir)
     ensure_dir(out_dir / "logs")
 
-    with open(out_dir / "run_config.json", "w", encoding="utf-8") as f:
-        json.dump(vars(args), f, indent=2)
+    save_json(out_dir / "run_config.json", vars(args))
 
     raw_ds = load_source_dataset(args)
-    if args.max_train_samples:
-        raw_ds = raw_ds.select(range(min(args.max_train_samples, len(raw_ds))))
+    raw_ds = maybe_limit_dataset(raw_ds, args.max_train_samples)
     train_ds, eval_ds = train_eval_split(raw_ds, args.val_size, args.seed)
-    if eval_ds is not None and args.max_eval_samples:
-        eval_ds = eval_ds.select(range(min(args.max_eval_samples, len(eval_ds))))
+    eval_ds = maybe_limit_dataset(eval_ds, args.max_eval_samples) if eval_ds is not None else None
 
-    processed_train = train_ds.map(
-        lambda row: preprocess_row(row, args.model_family),
-        remove_columns=train_ds.column_names,
-        desc="Formatting train prompts",
-    )
-    processed_eval = None
-    if eval_ds is not None:
-        processed_eval = eval_ds.map(
-            lambda row: preprocess_row(row, args.model_family),
-            remove_columns=eval_ds.column_names,
-            desc="Formatting eval prompts",
-        )
+    processed_train = format_dataset(train_ds, args.model_family, "Formatting train prompts")
+    processed_eval = format_dataset(eval_ds, args.model_family, "Formatting eval prompts") if eval_ds is not None else None
 
-    save_preview(processed_train, out_dir / "formatted_train_preview.jsonl")
+    train_preview_path = out_dir / "formatted_train_preview.jsonl"
+    eval_preview_path = out_dir / "formatted_eval_preview.jsonl" if processed_eval is not None else None
+
+    save_preview(processed_train, train_preview_path)
     if processed_eval is not None:
-        save_preview(processed_eval, out_dir / "formatted_eval_preview.jsonl")
+        save_preview(processed_eval, eval_preview_path)
+
+    if args.dry_run:
+        summary = write_dry_run_summary(
+            out_dir=out_dir,
+            train_examples=len(processed_train),
+            eval_examples=(len(processed_eval) if processed_eval is not None else 0),
+            train_preview_path=train_preview_path,
+            eval_preview_path=eval_preview_path,
+        )
+        print(json.dumps(summary, indent=2))
+        return
+
+    from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 
     tokenizer = AutoTokenizer.from_pretrained(
         args.model_name_or_path,
@@ -196,33 +290,14 @@ def main() -> None:
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
-    tokenized_train = processed_train.map(
-        lambda row: asdict(encode_example(tokenizer, row["prompt"], row["target"], args.max_length)),
-        remove_columns=processed_train.column_names,
-        desc="Tokenizing train data",
-    )
-    tokenized_eval = None
-    if processed_eval is not None:
-        tokenized_eval = processed_eval.map(
-            lambda row: asdict(encode_example(tokenizer, row["prompt"], row["target"], args.max_length)),
-            remove_columns=processed_eval.column_names,
-            desc="Tokenizing eval data",
-        )
-
-    quant_config = None
-    if args.load_in_4bit:
-        quant_config = BitsAndBytesConfig(
-            load_in_4bit=True,
-            bnb_4bit_quant_type="nf4",
-            bnb_4bit_compute_dtype=get_dtype(args.dtype),
-            bnb_4bit_use_double_quant=True,
-        )
+    tokenized_train = tokenize_dataset(processed_train, tokenizer, args.max_length, "Tokenizing train data")
+    tokenized_eval = tokenize_dataset(processed_eval, tokenizer, args.max_length, "Tokenizing eval data")
 
     model = AutoModelForCausalLM.from_pretrained(
         args.model_name_or_path,
         token=args.hf_token,
         torch_dtype=get_dtype(args.dtype),
-        quantization_config=quant_config,
+        quantization_config=build_quant_config(args),
         device_map="auto",
         trust_remote_code=args.trust_remote_code,
         attn_implementation=args.attn_implementation,
@@ -246,6 +321,7 @@ def main() -> None:
 
     train_args = TrainingArguments(
         output_dir=str(out_dir),
+        max_steps=args.max_steps,
         per_device_train_batch_size=args.per_device_train_batch_size,
         per_device_eval_batch_size=args.per_device_eval_batch_size,
         gradient_accumulation_steps=args.gradient_accumulation_steps,
@@ -280,13 +356,11 @@ def main() -> None:
     tokenizer.save_pretrained(out_dir)
 
     metrics = train_result.metrics
-    with open(out_dir / "train_metrics.json", "w", encoding="utf-8") as f:
-        json.dump(metrics, f, indent=2)
+    save_json(out_dir / "train_metrics.json", metrics)
 
     if tokenized_eval is not None:
         eval_metrics = trainer.evaluate()
-        with open(out_dir / "eval_metrics.json", "w", encoding="utf-8") as f:
-            json.dump(eval_metrics, f, indent=2)
+        save_json(out_dir / "eval_metrics.json", eval_metrics)
 
 
 if __name__ == "__main__":

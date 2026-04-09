@@ -1,0 +1,33 @@
+# macOS / Python noise
+.DS_Store
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Hugging Face / local dataset storage
+.hf-datasets-cache/
+local_datasets*/
+
+# Generated evaluation / training artifacts
+Prompting Baselines/outputs/
+Prompting Baselines/logs/
+Post-Training Baselines/outputs/
+Post-Training Baselines/logs/
+
+# Common local model / checkpoint directories
+models/
+checkpoints/
+**/checkpoint-*/
+
+# Common model weight files
+*.safetensors
+*.ckpt
+*.gguf
+*.onnx
