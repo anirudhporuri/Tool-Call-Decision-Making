@@ -77,6 +77,13 @@ def save_json(path: str | Path, payload: Dict[str, Any]) -> None:
         json.dump(payload, f, indent=2)
 
 
+def sanitized_args_dict(args: argparse.Namespace) -> Dict[str, Any]:
+    payload = vars(args).copy()
+    if payload.get("hf_token"):
+        payload["hf_token"] = "[REDACTED]"
+    return payload
+
+
 def safe_dataset_slug(*parts: str) -> str:
     return "__".join(part.replace("/", "__") for part in parts if part)
 
@@ -190,7 +197,7 @@ def main(argv: Optional[List[str]] = None) -> None:
     args = parse_args(argv)
     out_dir = ensure_dir(args.output_dir)
 
-    save_json(out_dir / "run_config.json", vars(args))
+    save_json(out_dir / "run_config.json", sanitized_args_dict(args))
 
     raw_ds = load_source_dataset(args)
     raw_ds = maybe_limit_dataset(raw_ds, args.max_train_samples)

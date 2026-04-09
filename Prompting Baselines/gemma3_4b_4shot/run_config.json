@@ -1,0 +1,20 @@
+{
+  "model_name_or_path": "google/gemma-3-4b-it",
+  "model_family": "gemma",
+  "output_dir": "outputs/gemma3_4b_4shot",
+  "hf_token": "[REDACTED]",
+  "dataset_name": "nvidia/When2Call",
+  "dataset_config": "test",
+  "dataset_split": "mcq",
+  "dataset_dir": "/content/drive/MyDrive/when2call_datasets",
+  "dtype": "bfloat16",
+  "attn_implementation": null,
+  "max_examples": null,
+  "start_index": 0,
+  "num_shots": 4,
+  "dry_run": false,
+  "fewshot_json": "fewshot_examples.template.json",
+  "save_prompt_text": false,
+  "trust_remote_code": false,
+  "device_map": "auto"
+}

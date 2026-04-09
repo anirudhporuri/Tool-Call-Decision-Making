@@ -117,6 +117,13 @@ def save_json(path: str | Path, payload: Dict[str, Any]) -> None:
         json.dump(payload, f, indent=2)
 
 
+def sanitized_args_dict(args: argparse.Namespace) -> Dict[str, Any]:
+    payload = vars(args).copy()
+    if payload.get("hf_token"):
+        payload["hf_token"] = "[REDACTED]"
+    return payload
+
+
 def safe_dataset_slug(*parts: str) -> str:
     return "__".join(part.replace("/", "__") for part in parts if part)
 
@@ -324,7 +331,7 @@ def write_dry_run_outputs(
     summary_path = out_dir / "summary.json"
     config_path = out_dir / "run_config.json"
 
-    save_json(config_path, vars(args))
+    save_json(config_path, sanitized_args_dict(args))
 
     with open(sample_path, "w", encoding="utf-8") as fout:
         for idx in tqdm(range(args.start_index, end_index), desc="Dry run"):
@@ -395,7 +402,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     tokenizer, model = load_tokenizer_and_model(args)
     model.eval()
 
-    save_json(config_path, vars(args))
+    save_json(config_path, sanitized_args_dict(args))
 
     golds: List[str] = []
     preds_raw: List[str] = []
