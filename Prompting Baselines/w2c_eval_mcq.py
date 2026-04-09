@@ -3,9 +3,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import math
-import os
-from collections import Counter, defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
@@ -31,7 +28,7 @@ class CandidateScore:
 
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="When2Call MCQ evaluation for zero/one/few-shot prompting baselines.")
     parser.add_argument("--model_name_or_path", type=str, required=True)
     parser.add_argument("--model_family", type=str, choices=["llama", "gemma"], required=True)
@@ -78,7 +75,7 @@ def parse_args() -> argparse.Namespace:
         default="auto",
         help="Transformers device_map. Use 'auto' on a single GPU node unless you need something else.",
     )
-    return parser.parse_args()
+    return parser.parse_args(argv)
 
 
 
@@ -109,17 +106,15 @@ def get_dtype(dtype_name: str) -> torch.dtype:
         "float32": torch.float32,
     }[dtype_name]
 
-
-
-def safe_model_slug(name: str) -> str:
-    return name.replace("/", "__")
-
-
-
 def ensure_dir(path: str | Path) -> Path:
     p = Path(path)
     p.mkdir(parents=True, exist_ok=True)
     return p
+
+
+def save_json(path: str | Path, payload: Dict[str, Any]) -> None:
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2)
 
 
 def safe_dataset_slug(*parts: str) -> str:
@@ -155,6 +150,32 @@ def flatten_answers_field(answers: Any) -> Dict[str, str]:
     if isinstance(answers, dict):
         return {k: str(v) for k, v in answers.items()}
     raise TypeError(f"Unsupported answers field type: {type(answers)}")
+
+
+def get_end_index(dataset_size: int, start_index: int, max_examples: Optional[int]) -> int:
+    if max_examples is None:
+        return dataset_size
+    return min(dataset_size, start_index + max_examples)
+
+
+def build_candidate_pairs(answers: Dict[str, str], model_family: str) -> List[Tuple[str, str]]:
+    return [
+        (label, convert_test_choice_for_model(label, answers[label], model_family))
+        for label in ANSWER_ORDER
+    ]
+
+
+def build_sample_base(row: Dict[str, Any], index: int, answers: Dict[str, str]) -> Dict[str, Any]:
+    return {
+        "index": index,
+        "uuid": row["uuid"],
+        "source": row.get("source"),
+        "source_id": row.get("source_id"),
+        "question": row["question"],
+        "gold": row["correct_answer"],
+        "tools": row["tools"],
+        "answers_original": answers,
+    }
 
 
 
@@ -303,8 +324,7 @@ def write_dry_run_outputs(
     summary_path = out_dir / "summary.json"
     config_path = out_dir / "run_config.json"
 
-    with open(config_path, "w", encoding="utf-8") as f:
-        json.dump(vars(args), f, indent=2)
+    save_json(config_path, vars(args))
 
     with open(sample_path, "w", encoding="utf-8") as fout:
         for idx in tqdm(range(args.start_index, end_index), desc="Dry run"):
@@ -316,20 +336,10 @@ def write_dry_run_outputs(
                 tools=row["tools"],
                 fewshot_examples=fewshot_examples,
             )
-            candidate_pairs = [
-                (label, convert_test_choice_for_model(label, answers[label], args.model_family))
-                for label in ANSWER_ORDER
-            ]
+            candidate_pairs = build_candidate_pairs(answers, args.model_family)
             sample_record: Dict[str, Any] = {
                 "mode": "dry_run",
-                "index": idx,
-                "uuid": row["uuid"],
-                "source": row.get("source"),
-                "source_id": row.get("source_id"),
-                "question": row["question"],
-                "gold": row["correct_answer"],
-                "tools": row["tools"],
-                "answers_original": answers,
+                **build_sample_base(row, idx, answers),
                 "rendered_choices": [
                     {"label": label, "rendered_choice": choice_text}
                     for label, choice_text in candidate_pairs
@@ -355,18 +365,17 @@ def write_dry_run_outputs(
             "output_writes",
         ],
     }
-    with open(summary_path, "w", encoding="utf-8") as f:
-        json.dump(summary, f, indent=2)
+    save_json(summary_path, summary)
     return summary
 
 
-def main() -> None:
-    args = parse_args()
+def main(argv: Optional[Sequence[str]] = None) -> None:
+    args = parse_args(argv)
     out_dir = ensure_dir(args.output_dir)
     fewshot_examples = load_fewshot_examples(args.fewshot_json, args.num_shots)
 
     dataset = load_eval_dataset(args)
-    end_index = len(dataset) if args.max_examples is None else min(len(dataset), args.start_index + args.max_examples)
+    end_index = get_end_index(len(dataset), args.start_index, args.max_examples)
 
     sample_path = out_dir / "samples.jsonl"
     summary_path = out_dir / "summary.json"
@@ -386,8 +395,7 @@ def main() -> None:
     tokenizer, model = load_tokenizer_and_model(args)
     model.eval()
 
-    with open(config_path, "w", encoding="utf-8") as f:
-        json.dump(vars(args), f, indent=2)
+    save_json(config_path, vars(args))
 
     golds: List[str] = []
     preds_raw: List[str] = []
@@ -403,10 +411,7 @@ def main() -> None:
                 tools=row["tools"],
                 fewshot_examples=fewshot_examples,
             )
-            candidate_pairs = [
-                (label, convert_test_choice_for_model(label, answers[label], args.model_family))
-                for label in ANSWER_ORDER
-            ]
+            candidate_pairs = build_candidate_pairs(answers, args.model_family)
             candidate_scores = score_prompt_plus_choice(model, tokenizer, prompt, candidate_pairs)
             pred_raw = max(candidate_scores, key=lambda x: x.raw_logprob).label
             pred_norm = max(candidate_scores, key=lambda x: x.norm_logprob).label
@@ -416,16 +421,9 @@ def main() -> None:
             preds_norm.append(pred_norm)
 
             sample_record: Dict[str, Any] = {
-                "index": idx,
-                "uuid": row["uuid"],
-                "source": row.get("source"),
-                "source_id": row.get("source_id"),
-                "question": row["question"],
-                "gold": row["correct_answer"],
+                **build_sample_base(row, idx, answers),
                 "pred_raw": pred_raw,
                 "pred_norm": pred_norm,
-                "tools": row["tools"],
-                "answers_original": answers,
                 "choices_scored": [
                     {
                         "label": cs.label,
@@ -444,8 +442,7 @@ def main() -> None:
             fout.write(json.dumps(sample_record, ensure_ascii=False) + "\n")
 
     summary = compute_summary(golds, preds_raw, preds_norm)
-    with open(summary_path, "w", encoding="utf-8") as f:
-        json.dump(summary, f, indent=2)
+    save_json(summary_path, summary)
 
     print(
         json.dumps(

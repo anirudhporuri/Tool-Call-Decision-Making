@@ -29,19 +29,16 @@ GEMMA_USER_INSTRUCTIONS = (
     "You SHOULD NOT include any other text in the response if you call a function.\n"
 )
 
+_TOOLCALL_RE = re.compile(r"<TOOLCALL>(.*?)</TOOLCALL>", re.DOTALL)
 
-def _normalize_tools(tools: Any) -> str:
-    """Turn tools into a readable JSON-ish blob for the prompt."""
+
+def serialize_tools(tools: Any) -> str:
     if isinstance(tools, str):
         return tools
     try:
         return json.dumps(tools, ensure_ascii=False, indent=2)
     except TypeError:
-        # Some rows may already contain serialized tool strings.
         return str(tools)
-
-
-_TOOLCALL_RE = re.compile(r"<TOOLCALL>(.*?)</TOOLCALL>", re.DOTALL)
 
 
 def extract_toolcall_payload(text: str) -> Optional[str]:
@@ -51,15 +48,11 @@ def extract_toolcall_payload(text: str) -> Optional[str]:
     return match.group(1).strip()
 
 
-_STRING_RE = re.compile(r'^"(.*)"$', re.DOTALL)
-
-
-def _maybe_json_load(s: str) -> Any:
-    s = s.strip()
+def _maybe_json_load(text: str) -> Any:
     try:
-        return json.loads(s)
+        return json.loads(text.strip())
     except Exception:
-        return s
+        return text
 
 
 def _python_literal(value: Any) -> str:
@@ -74,24 +67,14 @@ def _python_literal(value: Any) -> str:
     return repr(value)
 
 
-
 def canonical_toolcall_to_llama(choice_text: str) -> str:
-    """
-    Convert a dataset-style tool call payload into Llama 3.2's pythonic list-of-calls surface form.
-
-    Accepted inputs include either:
-      - raw JSON: {"name": ..., "arguments": {...}}
-      - wrapped JSON: <TOOLCALL>[{"name": ..., "arguments": {...}}]</TOOLCALL>
-      - list form already
-    """
     payload = extract_toolcall_payload(choice_text) or choice_text.strip()
-    obj = _maybe_json_load(payload)
+    parsed = _maybe_json_load(payload)
 
-    # The test split usually uses a single JSON object; train tool-call strings can be JSON lists.
-    if isinstance(obj, dict):
-        calls = [obj]
-    elif isinstance(obj, list):
-        calls = obj
+    if isinstance(parsed, dict):
+        calls = [parsed]
+    elif isinstance(parsed, list):
+        calls = parsed
     else:
         return choice_text
 
@@ -99,25 +82,84 @@ def canonical_toolcall_to_llama(choice_text: str) -> str:
     for call in calls:
         if not isinstance(call, dict) or "name" not in call:
             return choice_text
-        name = call["name"]
         arguments = call.get("arguments", call.get("parameters", {})) or {}
         if not isinstance(arguments, dict):
             return choice_text
-        args_str = ", ".join(f"{k}={_python_literal(v)}" for k, v in arguments.items())
-        rendered_calls.append(f"{name}({args_str})")
+        rendered_args = ", ".join(f"{key}={_python_literal(value)}" for key, value in arguments.items())
+        rendered_calls.append(f"{call['name']}({rendered_args})")
     return "[" + ", ".join(rendered_calls) + "]"
 
 
-
-def _serialize_fewshot_answer(answer_text: str, model_family: str) -> str:
+def serialize_fewshot_answer(answer_text: str, model_family: str) -> str:
     payload = extract_toolcall_payload(answer_text)
     if payload is None:
         return answer_text.strip()
     if model_family == "llama":
         return canonical_toolcall_to_llama(answer_text)
-    # Gemma baseline uses JSON tool calls.
     return payload
 
+
+def build_llama_prompt(question: str, tools: Any, fewshot_examples: List[Dict[str, Any]]) -> str:
+    parts: List[str] = [
+        "<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n",
+        LLAMA_SYSTEM,
+        "<|eot_id|>\n",
+    ]
+
+    for example in fewshot_examples:
+        parts.extend(
+            [
+                "<|start_header_id|>user<|end_header_id|>\n",
+                "Here is a list of functions in JSON format that you can invoke.\n",
+                serialize_tools(example["tools"]),
+                "\n\n",
+                example["question"].strip(),
+                "\n<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n",
+                serialize_fewshot_answer(example["answer"], "llama"),
+                "\n<|eot_id|>\n",
+            ]
+        )
+
+    parts.extend(
+        [
+            "<|start_header_id|>user<|end_header_id|>\n",
+            "Here is a list of functions in JSON format that you can invoke.\n",
+            serialize_tools(tools),
+            "\n\n",
+            question.strip(),
+            "\n<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n",
+        ]
+    )
+    return "".join(parts)
+
+
+def build_gemma_prompt(question: str, tools: Any, fewshot_examples: List[Dict[str, Any]]) -> str:
+    parts = ["<start_of_turn>user\n", GEMMA_USER_INSTRUCTIONS]
+
+    for i, example in enumerate(fewshot_examples, start=1):
+        parts.extend(
+            [
+                f"\nExample {i}\n",
+                "Functions:\n",
+                serialize_tools(example["tools"]),
+                "\nQuestion:\n",
+                example["question"].strip(),
+                "\nAnswer:\n",
+                serialize_fewshot_answer(example["answer"], "gemma"),
+                "\n",
+            ]
+        )
+
+    parts.extend(
+        [
+            "\nFunctions:\n",
+            serialize_tools(tools),
+            "\nQuestion:\n",
+            question.strip(),
+            "<end_of_turn>\n<start_of_turn>model\n",
+        ]
+    )
+    return "".join(parts)
 
 
 def build_prompt(
@@ -127,64 +169,20 @@ def build_prompt(
     tools: Any,
     fewshot_examples: Optional[List[Dict[str, Any]]] = None,
 ) -> str:
-    model_family = model_family.lower()
-    tools_text = _normalize_tools(tools)
     fewshot_examples = fewshot_examples or []
+    model_family = model_family.lower()
 
     if model_family == "llama":
-        parts: List[str] = []
-        parts.append("<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n")
-        parts.append(LLAMA_SYSTEM)
-        parts.append("<|eot_id|>\n")
-        for ex in fewshot_examples:
-            ex_tools = _normalize_tools(ex["tools"])
-            ex_answer = _serialize_fewshot_answer(ex["answer"], model_family)
-            parts.append("<|start_header_id|>user<|end_header_id|>\n")
-            parts.append("Here is a list of functions in JSON format that you can invoke.\n")
-            parts.append(ex_tools)
-            parts.append("\n\n")
-            parts.append(ex["question"].strip())
-            parts.append("\n<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n")
-            parts.append(ex_answer)
-            parts.append("\n<|eot_id|>\n")
-        parts.append("<|start_header_id|>user<|end_header_id|>\n")
-        parts.append("Here is a list of functions in JSON format that you can invoke.\n")
-        parts.append(tools_text)
-        parts.append("\n\n")
-        parts.append(question.strip())
-        parts.append("\n<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n")
-        return "".join(parts)
-
+        return build_llama_prompt(question, tools, fewshot_examples)
     if model_family == "gemma":
-        parts = ["<start_of_turn>user\n", GEMMA_USER_INSTRUCTIONS]
-        for i, ex in enumerate(fewshot_examples, start=1):
-            ex_tools = _normalize_tools(ex["tools"])
-            ex_answer = _serialize_fewshot_answer(ex["answer"], model_family)
-            parts.append(f"\nExample {i}\n")
-            parts.append("Functions:\n")
-            parts.append(ex_tools)
-            parts.append("\nQuestion:\n")
-            parts.append(ex["question"].strip())
-            parts.append("\nAnswer:\n")
-            parts.append(ex_answer)
-            parts.append("\n")
-        parts.append("\nFunctions:\n")
-        parts.append(tools_text)
-        parts.append("\nQuestion:\n")
-        parts.append(question.strip())
-        parts.append("<end_of_turn>\n<start_of_turn>model\n")
-        return "".join(parts)
-
+        return build_gemma_prompt(question, tools, fewshot_examples)
     raise ValueError(f"Unsupported model_family={model_family!r}. Use 'llama' or 'gemma'.")
 
 
-
 def convert_test_choice_for_model(choice_label: str, choice_text: str, model_family: str) -> str:
-    """Map the dataset's canonical answer strings into the model-specific surface form used for scoring."""
     if choice_label == "tool_call" and model_family.lower() == "llama":
         return canonical_toolcall_to_llama(choice_text)
     if choice_label == "tool_call" and model_family.lower() == "gemma":
-        # Keep JSON-style tool-call output for Gemma.
         payload = extract_toolcall_payload(choice_text)
         return payload if payload is not None else choice_text
     return choice_text.strip()

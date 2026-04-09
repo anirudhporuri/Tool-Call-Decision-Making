@@ -11,9 +11,9 @@
 #SBATCH --gres=gpu:1
 
 # Submit with something like:
-# sbatch eval_class.sbatch meta-llama/Llama-3.2-3B-Instruct llama 0 outputs/llama3_2_zeroshot
-# sbatch eval_class.sbatch meta-llama/Llama-3.2-3B-Instruct llama 4 outputs/llama3_2_4shot fewshot_examples.json
-# sbatch eval_class.sbatch google/gemma-3-4b-it gemma 4 outputs/gemma3_4b_4shot fewshot_examples.json
+# sbatch eval_class.slurm meta-llama/Llama-3.2-3B-Instruct llama 0 outputs/llama3_2_zeroshot
+# sbatch eval_class.slurm meta-llama/Llama-3.2-3B-Instruct llama 4 outputs/llama3_2_4shot fewshot_examples.json
+# sbatch eval_class.slurm google/gemma-3-4b-it gemma 4 outputs/gemma3_4b_4shot fewshot_examples.json
 
 set -euo pipefail
 mkdir -p logs
@@ -36,7 +36,7 @@ cd "$(dirname "$0")"
 export TOKENIZERS_PARALLELISM=false
 export PYTHONUNBUFFERED=1
 
-bash run_eval.sh \
+python run_eval.py \
   "${MODEL_NAME_OR_PATH}" \
   "${MODEL_FAMILY}" \
   "${NUM_SHOTS}" \
