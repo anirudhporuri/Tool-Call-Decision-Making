@@ -199,6 +199,39 @@ def supported_kwargs(callable_obj, kwargs: Dict[str, Any]) -> Dict[str, Any]:
     return {key: value for key, value in kwargs.items() if key in params}
 
 
+def add_zero_token_type_ids(result: Any) -> Any:
+    if "token_type_ids" in result or "input_ids" not in result:
+        return result
+
+    input_ids = result["input_ids"]
+    if torch.is_tensor(input_ids):
+        result["token_type_ids"] = torch.zeros_like(input_ids)
+        return result
+
+    if isinstance(input_ids, list):
+        if input_ids and isinstance(input_ids[0], list):
+            result["token_type_ids"] = [[0 for _ in row] for row in input_ids]
+        else:
+            result["token_type_ids"] = [0 for _ in input_ids]
+    return result
+
+
+def patch_gemma_tokenizer_for_training(tokenizer) -> None:
+    tokenizer_cls = type(tokenizer)
+    if getattr(tokenizer_cls, "_w2c_forces_token_type_ids", False):
+        return
+
+    original_call = tokenizer_cls.__call__
+
+    def patched_call(self, *args, **kwargs):
+        kwargs.setdefault("return_token_type_ids", True)
+        result = original_call(self, *args, **kwargs)
+        return add_zero_token_type_ids(result)
+
+    tokenizer_cls.__call__ = patched_call
+    tokenizer_cls._w2c_forces_token_type_ids = True
+
+
 def main(argv: Optional[List[str]] = None) -> None:
     args = parse_args(argv)
     out_dir = ensure_dir(args.output_dir)
@@ -241,6 +274,8 @@ def main(argv: Optional[List[str]] = None) -> None:
     )
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
+    if args.model_family == "gemma":
+        patch_gemma_tokenizer_for_training(tokenizer)
 
     model = AutoModelForCausalLM.from_pretrained(
         args.model_name_or_path,
