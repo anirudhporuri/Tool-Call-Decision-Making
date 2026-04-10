@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import inspect
 import json
+from types import MethodType
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -232,6 +233,21 @@ def patch_gemma_tokenizer_for_training(tokenizer) -> None:
     tokenizer_cls._w2c_forces_token_type_ids = True
 
 
+def patch_gemma_model_forward_for_training(model) -> None:
+    if getattr(model, "_w2c_injects_token_type_ids", False):
+        return
+
+    original_forward = model.forward
+
+    def patched_forward(self, *args, **kwargs):
+        if kwargs.get("token_type_ids") is None and kwargs.get("input_ids") is not None:
+            kwargs["token_type_ids"] = torch.zeros_like(kwargs["input_ids"])
+        return original_forward(*args, **kwargs)
+
+    model.forward = MethodType(patched_forward, model)
+    model._w2c_injects_token_type_ids = True
+
+
 def main(argv: Optional[List[str]] = None) -> None:
     args = parse_args(argv)
     out_dir = ensure_dir(args.output_dir)
@@ -286,6 +302,8 @@ def main(argv: Optional[List[str]] = None) -> None:
         trust_remote_code=args.trust_remote_code,
         attn_implementation=args.attn_implementation,
     )
+    if args.model_family == "gemma":
+        patch_gemma_model_forward_for_training(model)
     if args.load_in_4bit:
         model = prepare_model_for_kbit_training(model)
     if args.gradient_checkpointing:
