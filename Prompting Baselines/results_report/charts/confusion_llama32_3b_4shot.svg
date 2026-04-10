@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="860" height="780" viewBox="0 0 860 780" fill="none">
+<rect width="860" height="780" fill="#fffdf7" rx="24"/>
+<style>text { font-family: 'Avenir Next', 'Segoe UI', sans-serif; fill: #111827; }.title { font-size: 26px; font-weight: 700; }.subtitle { font-size: 14px; fill: #475569; }.label { font-size: 13px; }.small { font-size: 12px; }.legend { font-size: 13px; }.muted { fill: #64748b; }.grid { stroke: #e2e8f0; stroke-width: 1; }.axis { stroke: #94a3b8; stroke-width: 1.5; }</style>
+<text x="60" y="66" text-anchor="start" class="title">Llama 3.2 3B 4-shot Confusion Matrix</text>
+<text x="60" y="96" text-anchor="start" class="subtitle">Rows are gold labels, columns are predicted labels. Cells show row-normalized percentages.</text>
+<text x="485.0" y="146" text-anchor="middle" class="label" font-weight="700">Predicted Label</text>
+<text transform="translate(92 440.0) rotate(-90)" text-anchor="middle" class="label" font-weight="700">Gold Label</text>
+<text x="330.0" y="178" text-anchor="middle" class="label"><tspan x="330.0" dy="0">Tool</tspan><tspan x="330.0" dy="16">Call</tspan></text>
+<text x="480.0" y="178" text-anchor="middle" class="label"><tspan x="480.0" dy="0">Request</tspan><tspan x="480.0" dy="16">Info</tspan></text>
+<text x="630.0" y="178" text-anchor="middle" class="label"><tspan x="630.0" dy="0">Cannot</tspan><tspan x="630.0" dy="16">Answer</tspan></text>
+<text x="236" y="264" text-anchor="end" class="label"><tspan x="236" dy="0">Tool</tspan><tspan x="236" dy="15">Call</tspan><tspan x="236" dy="15">(n=1295)</tspan></text>
+<rect x="260" y="220" width="140" height="140" rx="14" fill="#2a58da" stroke="#cbd5e1" stroke-width="1"/>
+<text x="330.0" y="284" text-anchor="middle" font-weight="700" fill="#ffffff">93.9%</text>
+<text x="330.0" y="312" text-anchor="middle" class="small" fill="#ffffff">1216/1295</text>
+<rect x="410" y="220" width="140" height="140" rx="14" fill="#f1f4fb" stroke="#cbd5e1" stroke-width="1"/>
+<text x="480.0" y="284" text-anchor="middle" font-weight="700" fill="#0f172a">3.3%</text>
+<text x="480.0" y="312" text-anchor="middle" class="small" fill="#0f172a">43/1295</text>
+<rect x="560" y="220" width="140" height="140" rx="14" fill="#f4f7fb" stroke="#cbd5e1" stroke-width="1"/>
+<text x="630.0" y="284" text-anchor="middle" font-weight="700" fill="#0f172a">1.7%</text>
+<text x="630.0" y="312" text-anchor="middle" class="small" fill="#0f172a">22/1295</text>
+<text x="236" y="414" text-anchor="end" class="label"><tspan x="236" dy="0">Request</tspan><tspan x="236" dy="15">Info</tspan><tspan x="236" dy="15">(n=1062)</tspan></text>
+<rect x="260" y="370" width="140" height="140" rx="14" fill="#6d8de5" stroke="#cbd5e1" stroke-width="1"/>
+<text x="330.0" y="434" text-anchor="middle" font-weight="700" fill="#ffffff">63.7%</text>
+<text x="330.0" y="462" text-anchor="middle" class="small" fill="#ffffff">676/1062</text>
+<rect x="410" y="370" width="140" height="140" rx="14" fill="#b6c6f1" stroke="#cbd5e1" stroke-width="1"/>
+<text x="480.0" y="434" text-anchor="middle" font-weight="700" fill="#0f172a">30.0%</text>
+<text x="480.0" y="462" text-anchor="middle" class="small" fill="#0f172a">319/1062</text>
+<rect x="560" y="370" width="140" height="140" rx="14" fill="#edf1fa" stroke="#cbd5e1" stroke-width="1"/>
+<text x="630.0" y="434" text-anchor="middle" font-weight="700" fill="#0f172a">5.1%</text>
+<text x="630.0" y="462" text-anchor="middle" class="small" fill="#0f172a">54/1062</text>
+<text x="236" y="564" text-anchor="end" class="label"><tspan x="236" dy="0">Cannot</tspan><tspan x="236" dy="15">Answer</tspan><tspan x="236" dy="15">(n=1295)</tspan></text>
+<rect x="260" y="520" width="140" height="140" rx="14" fill="#d9e2f7" stroke="#cbd5e1" stroke-width="1"/>
+<text x="330.0" y="584" text-anchor="middle" font-weight="700" fill="#0f172a">14.2%</text>
+<text x="330.0" y="612" text-anchor="middle" class="small" fill="#0f172a">184/1295</text>
+<rect x="410" y="520" width="140" height="140" rx="14" fill="#d0dbf5" stroke="#cbd5e1" stroke-width="1"/>
+<text x="480.0" y="584" text-anchor="middle" font-weight="700" fill="#0f172a">18.2%</text>
+<text x="480.0" y="612" text-anchor="middle" class="small" fill="#0f172a">236/1295</text>
+<rect x="560" y="520" width="140" height="140" rx="14" fill="#8fa8eb" stroke="#cbd5e1" stroke-width="1"/>
+<text x="630.0" y="584" text-anchor="middle" font-weight="700" fill="#0f172a">47.9%</text>
+<text x="630.0" y="612" text-anchor="middle" class="small" fill="#0f172a">620/1295</text>
+<text x="60" y="734" text-anchor="start" class="small muted">Only active labels are shown here. The &#x27;direct&#x27; class is omitted because it has zero support in these runs.</text>
+</svg>

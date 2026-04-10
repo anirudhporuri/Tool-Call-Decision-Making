@@ -1,0 +1,99 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="972" viewBox="0 0 1120 972" fill="none">
+<rect width="1120" height="972" fill="#fffdf7" rx="24"/>
+<style>text { font-family: 'Avenir Next', 'Segoe UI', sans-serif; fill: #111827; }.title { font-size: 26px; font-weight: 700; }.subtitle { font-size: 14px; fill: #475569; }.label { font-size: 13px; }.small { font-size: 12px; }.legend { font-size: 13px; }.muted { fill: #64748b; }.grid { stroke: #e2e8f0; stroke-width: 1; }.axis { stroke: #94a3b8; stroke-width: 1.5; }</style>
+<text x="60" y="66" text-anchor="start" class="title">What Byte-Length Normalization Changed</text>
+<text x="60" y="96" text-anchor="start" class="subtitle">Each bar partitions the test set into examples normalization kept right, fixed, broke, or still missed.</text>
+<line x1="270.0" y1="130" x2="270.0" y2="718" class="grid"/>
+<text x="270.0" y="122" text-anchor="middle" class="small muted">0%</text>
+<line x1="346.0" y1="130" x2="346.0" y2="718" class="grid"/>
+<text x="346.0" y="122" text-anchor="middle" class="small muted">10%</text>
+<line x1="422.0" y1="130" x2="422.0" y2="718" class="grid"/>
+<text x="422.0" y="122" text-anchor="middle" class="small muted">20%</text>
+<line x1="498.0" y1="130" x2="498.0" y2="718" class="grid"/>
+<text x="498.0" y="122" text-anchor="middle" class="small muted">30%</text>
+<line x1="574.0" y1="130" x2="574.0" y2="718" class="grid"/>
+<text x="574.0" y="122" text-anchor="middle" class="small muted">40%</text>
+<line x1="650.0" y1="130" x2="650.0" y2="718" class="grid"/>
+<text x="650.0" y="122" text-anchor="middle" class="small muted">50%</text>
+<line x1="726.0" y1="130" x2="726.0" y2="718" class="grid"/>
+<text x="726.0" y="122" text-anchor="middle" class="small muted">60%</text>
+<line x1="802.0" y1="130" x2="802.0" y2="718" class="grid"/>
+<text x="802.0" y="122" text-anchor="middle" class="small muted">70%</text>
+<line x1="878.0" y1="130" x2="878.0" y2="718" class="grid"/>
+<text x="878.0" y="122" text-anchor="middle" class="small muted">80%</text>
+<line x1="954.0" y1="130" x2="954.0" y2="718" class="grid"/>
+<text x="954.0" y="122" text-anchor="middle" class="small muted">90%</text>
+<line x1="1030.0" y1="130" x2="1030.0" y2="718" class="grid"/>
+<text x="1030.0" y="122" text-anchor="middle" class="small muted">100%</text>
+<text x="60" y="170" text-anchor="start" class="label" font-weight="700"><tspan x="60" dy="0">Llama 3.2 3B</tspan><tspan x="60" dy="16">0-shot</tspan></text>
+<rect x="270" y="150" width="272.61774370208104" height="52" rx="12" fill="#15803d"/>
+<text x="406.3088718510405" y="172" text-anchor="middle" class="small" font-weight="700" fill="#ffffff">Stayed correct</text>
+<text x="406.3088718510405" y="190" text-anchor="middle" class="small" fill="#ffffff">35.9%</text>
+<rect x="542.617743702081" y="150" width="85.11500547645126" height="52" rx="12" fill="#2563eb"/>
+<rect x="627.7327491785323" y="150" width="14.151150054764512" height="52" rx="12" fill="#dc2626"/>
+<rect x="641.8838992332968" y="150" width="388.1161007667032" height="52" rx="12" fill="#94a3b8"/>
+<text x="835.9419496166483" y="172" text-anchor="middle" class="small" font-weight="700" fill="#ffffff">Stayed wrong</text>
+<text x="835.9419496166483" y="190" text-anchor="middle" class="small" fill="#ffffff">51.1%</text>
+<text x="1048" y="182" text-anchor="start" font-weight="700">+9.3 pp</text>
+<text x="60" y="270" text-anchor="start" class="label" font-weight="700"><tspan x="60" dy="0">Llama 3.2 3B</tspan><tspan x="60" dy="16">4-shot</tspan></text>
+<rect x="270" y="250" width="309.03614457831327" height="52" rx="12" fill="#15803d"/>
+<text x="424.51807228915663" y="272" text-anchor="middle" class="small" font-weight="700" fill="#ffffff">Stayed correct</text>
+<text x="424.51807228915663" y="290" text-anchor="middle" class="small" fill="#ffffff">40.7%</text>
+<rect x="579.0361445783133" y="250" width="139.4304490690033" height="52" rx="12" fill="#2563eb"/>
+<text x="648.7513691128149" y="272" text-anchor="middle" class="small" font-weight="700" fill="#ffffff">Fixed by normalization</text>
+<text x="648.7513691128149" y="290" text-anchor="middle" class="small" fill="#ffffff">18.3%</text>
+<rect x="718.4665936473166" y="250" width="28.92661555312158" height="52" rx="12" fill="#dc2626"/>
+<rect x="747.3932092004382" y="250" width="282.60679079956185" height="52" rx="12" fill="#94a3b8"/>
+<text x="888.6966046002191" y="272" text-anchor="middle" class="small" font-weight="700" fill="#ffffff">Stayed wrong</text>
+<text x="888.6966046002191" y="290" text-anchor="middle" class="small" fill="#ffffff">37.2%</text>
+<text x="1048" y="282" text-anchor="start" font-weight="700">+14.5 pp</text>
+<text x="60" y="370" text-anchor="start" class="label" font-weight="700"><tspan x="60" dy="0">Llama 3.2 3B</tspan><tspan x="60" dy="16">SFT</tspan></text>
+<rect x="270" y="350" width="404.5564074479737" height="52" rx="12" fill="#15803d"/>
+<text x="472.27820372398685" y="372" text-anchor="middle" class="small" font-weight="700" fill="#ffffff">Stayed correct</text>
+<text x="472.27820372398685" y="390" text-anchor="middle" class="small" fill="#ffffff">53.2%</text>
+<rect x="674.5564074479737" y="350" width="30.59145673603505" height="52" rx="12" fill="#2563eb"/>
+<rect x="705.1478641840088" y="350" width="33.08871851040526" height="52" rx="12" fill="#dc2626"/>
+<rect x="738.236582694414" y="350" width="291.763417305586" height="52" rx="12" fill="#94a3b8"/>
+<text x="884.118291347207" y="372" text-anchor="middle" class="small" font-weight="700" fill="#ffffff">Stayed wrong</text>
+<text x="884.118291347207" y="390" text-anchor="middle" class="small" fill="#ffffff">38.4%</text>
+<text x="1048" y="382" text-anchor="start" font-weight="700">-0.3 pp</text>
+<text x="60" y="470" text-anchor="start" class="label" font-weight="700"><tspan x="60" dy="0">Gemma 3 4B</tspan><tspan x="60" dy="16">0-shot</tspan></text>
+<rect x="270" y="450" width="187.91894852135815" height="52" rx="12" fill="#15803d"/>
+<text x="363.9594742606791" y="472" text-anchor="middle" class="small" font-weight="700" fill="#ffffff">Stayed correct</text>
+<text x="363.9594742606791" y="490" text-anchor="middle" class="small" fill="#ffffff">24.7%</text>
+<rect x="457.9189485213582" y="450" width="24.97261774370208" height="52" rx="12" fill="#2563eb"/>
+<rect x="482.89156626506025" y="450" width="39.123767798466595" height="52" rx="12" fill="#dc2626"/>
+<rect x="522.0153340635269" y="450" width="507.9846659364732" height="52" rx="12" fill="#94a3b8"/>
+<text x="776.0076670317635" y="472" text-anchor="middle" class="small" font-weight="700" fill="#ffffff">Stayed wrong</text>
+<text x="776.0076670317635" y="490" text-anchor="middle" class="small" fill="#ffffff">66.8%</text>
+<text x="1048" y="482" text-anchor="start" font-weight="700">-1.9 pp</text>
+<text x="60" y="570" text-anchor="start" class="label" font-weight="700"><tspan x="60" dy="0">Gemma 3 4B</tspan><tspan x="60" dy="16">4-shot</tspan></text>
+<rect x="270" y="550" width="181.67579408543264" height="52" rx="12" fill="#15803d"/>
+<text x="360.83789704271635" y="572" text-anchor="middle" class="small" font-weight="700" fill="#ffffff">Stayed correct</text>
+<text x="360.83789704271635" y="590" text-anchor="middle" class="small" fill="#ffffff">23.9%</text>
+<rect x="451.67579408543264" y="550" width="26.22124863088719" height="52" rx="12" fill="#2563eb"/>
+<rect x="477.89704271631985" y="550" width="34.12924424972618" height="52" rx="12" fill="#dc2626"/>
+<rect x="512.026286966046" y="550" width="517.973713033954" height="52" rx="12" fill="#94a3b8"/>
+<text x="771.013143483023" y="572" text-anchor="middle" class="small" font-weight="700" fill="#ffffff">Stayed wrong</text>
+<text x="771.013143483023" y="590" text-anchor="middle" class="small" fill="#ffffff">68.2%</text>
+<text x="1048" y="582" text-anchor="start" font-weight="700">-1.0 pp</text>
+<text x="60" y="670" text-anchor="start" class="label" font-weight="700"><tspan x="60" dy="0">Gemma 3 4B</tspan><tspan x="60" dy="16">SFT</tspan></text>
+<rect x="270" y="650" width="195.82694414019716" height="52" rx="12" fill="#15803d"/>
+<text x="367.9134720700986" y="672" text-anchor="middle" class="small" font-weight="700" fill="#ffffff">Stayed correct</text>
+<text x="367.9134720700986" y="690" text-anchor="middle" class="small" fill="#ffffff">25.8%</text>
+<rect x="465.82694414019716" y="650" width="17.272727272727273" height="52" rx="12" fill="#2563eb"/>
+<rect x="483.0996714129244" y="650" width="47.03176341730559" height="52" rx="12" fill="#dc2626"/>
+<rect x="530.13143483023" y="650" width="499.86856516976997" height="52" rx="12" fill="#94a3b8"/>
+<text x="780.0657174151149" y="672" text-anchor="middle" class="small" font-weight="700" fill="#ffffff">Stayed wrong</text>
+<text x="780.0657174151149" y="690" text-anchor="middle" class="small" fill="#ffffff">65.8%</text>
+<text x="1048" y="682" text-anchor="start" font-weight="700">-3.9 pp</text>
+<rect x="60" y="740" width="20" height="20" rx="4" fill="#15803d"/>
+<text x="90" y="754" text-anchor="start" class="legend">Stayed correct</text>
+<rect x="320" y="740" width="20" height="20" rx="4" fill="#2563eb"/>
+<text x="350" y="754" text-anchor="start" class="legend">Fixed by normalization</text>
+<rect x="60" y="772" width="20" height="20" rx="4" fill="#dc2626"/>
+<text x="90" y="786" text-anchor="start" class="legend">Broken by normalization</text>
+<rect x="320" y="772" width="20" height="20" rx="4" fill="#94a3b8"/>
+<text x="350" y="786" text-anchor="start" class="legend">Stayed wrong</text>
+<text x="1060" y="786" text-anchor="end" class="small muted">Right-side label = net accuracy change</text>
+</svg>

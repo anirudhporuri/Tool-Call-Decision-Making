@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import inspect
 import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -193,6 +194,11 @@ def write_dry_run_summary(
     return summary
 
 
+def supported_kwargs(callable_obj, kwargs: Dict[str, Any]) -> Dict[str, Any]:
+    params = inspect.signature(callable_obj).parameters
+    return {key: value for key, value in kwargs.items() if key in params}
+
+
 def main(argv: Optional[List[str]] = None) -> None:
     args = parse_args(argv)
     out_dir = ensure_dir(args.output_dir)
@@ -262,49 +268,46 @@ def main(argv: Optional[List[str]] = None) -> None:
     model = get_peft_model(model, peft_config)
     model.print_trainable_parameters()
 
-    dpo_args = DPOConfig(
-        output_dir=str(out_dir),
-        max_steps=args.max_steps,
-        per_device_train_batch_size=args.per_device_train_batch_size,
-        per_device_eval_batch_size=args.per_device_eval_batch_size,
-        gradient_accumulation_steps=args.gradient_accumulation_steps,
-        num_train_epochs=args.num_train_epochs,
-        learning_rate=args.learning_rate,
-        weight_decay=args.weight_decay,
-        warmup_steps=args.warmup_steps,
-        logging_steps=args.logging_steps,
-        eval_strategy="steps" if eval_ds is not None else "no",
-        eval_steps=args.eval_steps,
-        save_steps=args.save_steps,
-        save_total_limit=args.save_total_limit,
-        bf16=(args.dtype == "bfloat16"),
-        fp16=(args.dtype == "float16"),
-        seed=args.seed,
-        report_to=args.report_to,
-        max_length=args.max_length,
-        max_prompt_length=args.max_prompt_length,
-        beta=args.beta,
-        remove_unused_columns=False,
-    )
+    trainer_config_kwargs = {
+        "output_dir": str(out_dir),
+        "max_steps": args.max_steps,
+        "per_device_train_batch_size": args.per_device_train_batch_size,
+        "per_device_eval_batch_size": args.per_device_eval_batch_size,
+        "gradient_accumulation_steps": args.gradient_accumulation_steps,
+        "num_train_epochs": args.num_train_epochs,
+        "learning_rate": args.learning_rate,
+        "weight_decay": args.weight_decay,
+        "warmup_steps": args.warmup_steps,
+        "logging_steps": args.logging_steps,
+        "eval_strategy": "steps" if eval_ds is not None else "no",
+        "evaluation_strategy": "steps" if eval_ds is not None else "no",
+        "eval_steps": args.eval_steps,
+        "save_steps": args.save_steps,
+        "save_total_limit": args.save_total_limit,
+        "bf16": (args.dtype == "bfloat16"),
+        "fp16": (args.dtype == "float16"),
+        "seed": args.seed,
+        "report_to": args.report_to,
+        "max_length": args.max_length,
+        "max_prompt_length": args.max_prompt_length,
+        "beta": args.beta,
+        "remove_unused_columns": False,
+    }
+    dpo_args = DPOConfig(**supported_kwargs(DPOConfig.__init__, trainer_config_kwargs))
 
-    try:
-        trainer = DPOTrainer(
-            model=model,
-            ref_model=None,
-            args=dpo_args,
-            train_dataset=train_ds,
-            eval_dataset=eval_ds,
-            processing_class=tokenizer,
-        )
-    except TypeError:
-        trainer = DPOTrainer(
-            model=model,
-            ref_model=None,
-            args=dpo_args,
-            train_dataset=train_ds,
-            eval_dataset=eval_ds,
-            tokenizer=tokenizer,
-        )
+    trainer_kwargs = {
+        "model": model,
+        "ref_model": None,
+        "args": dpo_args,
+        "train_dataset": train_ds,
+        "eval_dataset": eval_ds,
+        "processing_class": tokenizer,
+        "tokenizer": tokenizer,
+        "beta": args.beta,
+        "max_length": args.max_length,
+        "max_prompt_length": args.max_prompt_length,
+    }
+    trainer = DPOTrainer(**supported_kwargs(DPOTrainer.__init__, trainer_kwargs))
 
     train_result = trainer.train()
     trainer.save_model()

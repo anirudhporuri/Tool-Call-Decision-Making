@@ -1,0 +1,20 @@
+{
+  "model_name_or_path": "/content/drive/MyDrive/gemma3_4b_sft",
+  "model_family": "gemma",
+  "output_dir": "outputs/gemma3_4b_sft_zeroshot",
+  "hf_token": "[REDACTED]",
+  "dataset_name": "nvidia/When2Call",
+  "dataset_config": "test",
+  "dataset_split": "mcq",
+  "dataset_dir": "/content/drive/MyDrive/when2call_datasets",
+  "dtype": "bfloat16",
+  "attn_implementation": null,
+  "max_examples": null,
+  "start_index": 0,
+  "num_shots": 0,
+  "dry_run": false,
+  "fewshot_json": null,
+  "save_prompt_text": false,
+  "trust_remote_code": false,
+  "device_map": "auto"
+}

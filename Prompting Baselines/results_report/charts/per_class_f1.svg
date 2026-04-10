@@ -1,0 +1,78 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="820" viewBox="0 0 1440 820" fill="none">
+<rect width="1440" height="820" fill="#fffdf7" rx="24"/>
+<style>text { font-family: 'Avenir Next', 'Segoe UI', sans-serif; fill: #111827; }.title { font-size: 26px; font-weight: 700; }.subtitle { font-size: 14px; fill: #475569; }.label { font-size: 13px; }.small { font-size: 12px; }.legend { font-size: 13px; }.muted { fill: #64748b; }.grid { stroke: #e2e8f0; stroke-width: 1; }.axis { stroke: #94a3b8; stroke-width: 1.5; }</style>
+<text x="60" y="66" text-anchor="start" class="title">Normalized Per-Class F1</text>
+<text x="60" y="96" text-anchor="start" class="subtitle">F1 after byte-length normalization for the active labels in the test split.</text>
+<line x1="130" y1="570.0" x2="1350" y2="570.0" class="grid"/>
+<text x="116" y="574.0" text-anchor="end" class="small muted">0%</text>
+<line x1="130" y1="524.4444444444445" x2="1350" y2="524.4444444444445" class="grid"/>
+<text x="116" y="528.4444444444445" text-anchor="end" class="small muted">10%</text>
+<line x1="130" y1="478.8888888888889" x2="1350" y2="478.8888888888889" class="grid"/>
+<text x="116" y="482.8888888888889" text-anchor="end" class="small muted">20%</text>
+<line x1="130" y1="433.3333333333333" x2="1350" y2="433.3333333333333" class="grid"/>
+<text x="116" y="437.3333333333333" text-anchor="end" class="small muted">30%</text>
+<line x1="130" y1="387.77777777777777" x2="1350" y2="387.77777777777777" class="grid"/>
+<text x="116" y="391.77777777777777" text-anchor="end" class="small muted">40%</text>
+<line x1="130" y1="342.2222222222222" x2="1350" y2="342.2222222222222" class="grid"/>
+<text x="116" y="346.2222222222222" text-anchor="end" class="small muted">50%</text>
+<line x1="130" y1="296.66666666666663" x2="1350" y2="296.66666666666663" class="grid"/>
+<text x="116" y="300.66666666666663" text-anchor="end" class="small muted">60%</text>
+<line x1="130" y1="251.1111111111111" x2="1350" y2="251.1111111111111" class="grid"/>
+<text x="116" y="255.1111111111111" text-anchor="end" class="small muted">70%</text>
+<line x1="130" y1="205.55555555555554" x2="1350" y2="205.55555555555554" class="grid"/>
+<text x="116" y="209.55555555555554" text-anchor="end" class="small muted">80%</text>
+<line x1="130" y1="160.0" x2="1350" y2="160.0" class="grid"/>
+<text x="116" y="164.0" text-anchor="end" class="small muted">90%</text>
+<line x1="130" y1="570" x2="1350" y2="570" class="axis"/>
+<rect x="165.0" y="269.61287340382506" width="46.111111111111114" height="300.38712659617494" rx="10" fill="#0f766e"/>
+<text x="188.05555555555554" y="259.61287340382506" text-anchor="middle" class="small">65.9%</text>
+<rect x="223.11111111111111" y="241.3405188041794" width="46.111111111111114" height="328.6594811958206" rx="10" fill="#14b8a6"/>
+<text x="246.16666666666669" y="231.3405188041794" text-anchor="middle" class="small">72.1%</text>
+<rect x="281.22222222222223" y="552.1350762527234" width="46.111111111111114" height="17.864923747276688" rx="10" fill="#2dd4bf"/>
+<text x="304.27777777777777" y="542.1350762527234" text-anchor="middle" class="small">3.9%</text>
+<rect x="339.33333333333337" y="392.6350744929097" width="46.111111111111114" height="177.36492550709028" rx="10" fill="#b45309"/>
+<text x="362.3888888888889" y="382.6350744929097" text-anchor="middle" class="small">38.9%</text>
+<rect x="397.44444444444446" y="404.098483781627" width="46.111111111111114" height="165.90151621837302" rx="10" fill="#f59e0b"/>
+<text x="420.5" y="394.098483781627" text-anchor="middle" class="small">36.4%</text>
+<rect x="455.55555555555554" y="396.0673345969853" width="46.111111111111114" height="173.9326654030147" rx="10" fill="#fb923c"/>
+<text x="478.6111111111111" y="386.0673345969853" text-anchor="middle" class="small">38.2%</text>
+<text x="333.33333333333337" y="606" text-anchor="middle" class="label"><tspan x="333.33333333333337" dy="0">Tool</tspan><tspan x="333.33333333333337" dy="16">Call</tspan></text>
+<rect x="571.6666666666667" y="495.90361445783134" width="46.111111111111114" height="74.09638554216868" rx="10" fill="#0f766e"/>
+<text x="594.7222222222223" y="485.90361445783134" text-anchor="middle" class="small">16.3%</text>
+<rect x="629.7777777777778" y="394.9129852744311" width="46.111111111111114" height="175.08701472556893" rx="10" fill="#14b8a6"/>
+<text x="652.8333333333334" y="384.9129852744311" text-anchor="middle" class="small">38.4%</text>
+<rect x="687.8888888888889" y="226.4525993883792" width="46.111111111111114" height="343.5474006116208" rx="10" fill="#2dd4bf"/>
+<text x="710.9444444444445" y="216.4525993883792" text-anchor="middle" class="small">75.4%</text>
+<rect x="746.0000000000001" y="450.10392121321973" width="46.111111111111114" height="119.89607878678027" rx="10" fill="#b45309"/>
+<text x="769.0555555555557" y="440.10392121321973" text-anchor="middle" class="small">26.3%</text>
+<rect x="804.1111111111112" y="440.7271669575334" width="46.111111111111114" height="129.27283304246654" rx="10" fill="#f59e0b"/>
+<text x="827.1666666666667" y="430.7271669575334" text-anchor="middle" class="small">28.4%</text>
+<rect x="862.2222222222223" y="467.88748054258394" width="46.111111111111114" height="102.11251945741606" rx="10" fill="#fb923c"/>
+<text x="885.2777777777778" y="457.88748054258394" text-anchor="middle" class="small">22.4%</text>
+<text x="740.0000000000001" y="606" text-anchor="middle" class="label"><tspan x="740.0000000000001" dy="0">Request</tspan><tspan x="740.0000000000001" dy="16">Info</tspan></text>
+<rect x="978.3333333333334" y="384.5334652159578" width="46.111111111111114" height="185.46653478404218" rx="10" fill="#0f766e"/>
+<text x="1001.3888888888889" y="374.5334652159578" text-anchor="middle" class="small">40.7%</text>
+<rect x="1036.4444444444446" y="286.27881020146214" width="46.111111111111114" height="283.72118979853786" rx="10" fill="#14b8a6"/>
+<text x="1059.5000000000002" y="276.27881020146214" text-anchor="middle" class="small">62.3%</text>
+<rect x="1094.5555555555557" y="269.2801085737889" width="46.111111111111114" height="300.7198914262111" rx="10" fill="#2dd4bf"/>
+<text x="1117.6111111111113" y="259.2801085737889" text-anchor="middle" class="small">66.0%</text>
+<rect x="1152.6666666666667" y="434.80286738351253" width="46.111111111111114" height="135.19713261648744" rx="10" fill="#b45309"/>
+<text x="1175.7222222222224" y="424.80286738351253" text-anchor="middle" class="small">29.7%</text>
+<rect x="1210.7777777777778" y="436.3703703703704" width="46.111111111111114" height="133.62962962962962" rx="10" fill="#f59e0b"/>
+<text x="1233.8333333333335" y="426.3703703703704" text-anchor="middle" class="small">29.3%</text>
+<rect x="1268.888888888889" y="413.27589621707267" width="46.111111111111114" height="156.72410378292733" rx="10" fill="#fb923c"/>
+<text x="1291.9444444444446" y="403.27589621707267" text-anchor="middle" class="small">34.4%</text>
+<text x="1146.6666666666667" y="606" text-anchor="middle" class="label"><tspan x="1146.6666666666667" dy="0">Cannot</tspan><tspan x="1146.6666666666667" dy="16">Answer</tspan></text>
+<rect x="120.0" y="666" width="20" height="20" rx="4" fill="#0f766e"/>
+<text x="150.0" y="680" text-anchor="start" class="legend">Llama 0-shot</text>
+<rect x="520.0" y="666" width="20" height="20" rx="4" fill="#14b8a6"/>
+<text x="550.0" y="680" text-anchor="start" class="legend">Llama 4-shot</text>
+<rect x="920.0" y="666" width="20" height="20" rx="4" fill="#2dd4bf"/>
+<text x="950.0" y="680" text-anchor="start" class="legend">Llama SFT</text>
+<rect x="120.0" y="700" width="20" height="20" rx="4" fill="#b45309"/>
+<text x="150.0" y="714" text-anchor="start" class="legend">Gemma 0-shot</text>
+<rect x="520.0" y="700" width="20" height="20" rx="4" fill="#f59e0b"/>
+<text x="550.0" y="714" text-anchor="start" class="legend">Gemma 4-shot</text>
+<rect x="920.0" y="700" width="20" height="20" rx="4" fill="#fb923c"/>
+<text x="950.0" y="714" text-anchor="start" class="legend">Gemma SFT</text>
+</svg>

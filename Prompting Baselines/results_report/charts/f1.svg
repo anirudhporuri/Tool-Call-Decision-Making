@@ -1,0 +1,69 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1340" height="740" viewBox="0 0 1340 740" fill="none">
+<rect width="1340" height="740" fill="#fffdf7" rx="24"/>
+<style>text { font-family: 'Avenir Next', 'Segoe UI', sans-serif; fill: #111827; }.title { font-size: 26px; font-weight: 700; }.subtitle { font-size: 14px; fill: #475569; }.label { font-size: 13px; }.small { font-size: 12px; }.legend { font-size: 13px; }.muted { fill: #64748b; }.grid { stroke: #e2e8f0; stroke-width: 1; }.axis { stroke: #94a3b8; stroke-width: 1.5; }</style>
+<text x="60" y="66" text-anchor="start" class="title">F1</text>
+<text x="60" y="96" text-anchor="start" class="subtitle">Weighted-average F1 across labels from classification_report.</text>
+<line x1="110" y1="570.0" x2="1260" y2="570.0" class="grid"/>
+<text x="96" y="574.0" text-anchor="end" class="small muted">0%</text>
+<line x1="110" y1="514.5714285714286" x2="1260" y2="514.5714285714286" class="grid"/>
+<text x="96" y="518.5714285714286" text-anchor="end" class="small muted">10%</text>
+<line x1="110" y1="459.1428571428571" x2="1260" y2="459.1428571428571" class="grid"/>
+<text x="96" y="463.1428571428571" text-anchor="end" class="small muted">20%</text>
+<line x1="110" y1="403.71428571428567" x2="1260" y2="403.71428571428567" class="grid"/>
+<text x="96" y="407.71428571428567" text-anchor="end" class="small muted">30%</text>
+<line x1="110" y1="348.2857142857142" x2="1260" y2="348.2857142857142" class="grid"/>
+<text x="96" y="352.2857142857142" text-anchor="end" class="small muted">40%</text>
+<line x1="110" y1="292.85714285714283" x2="1260" y2="292.85714285714283" class="grid"/>
+<text x="96" y="296.85714285714283" text-anchor="end" class="small muted">50%</text>
+<line x1="110" y1="237.4285714285714" x2="1260" y2="237.4285714285714" class="grid"/>
+<text x="96" y="241.4285714285714" text-anchor="end" class="small muted">60%</text>
+<line x1="110" y1="181.9999999999999" x2="1260" y2="181.9999999999999" class="grid"/>
+<text x="96" y="185.9999999999999" text-anchor="end" class="small muted">70%</text>
+<line x1="110" y1="570" x2="1260" y2="570" class="axis"/>
+<rect x="137.83333333333331" y="435.827484385267" width="60.0" height="134.172515614733" rx="10" fill="#cbd5e1"/>
+<text x="167.83333333333331" y="425.827484385267" text-anchor="middle" class="small">24.2%</text>
+<text x="167.83333333333331" y="594" text-anchor="middle" class="small muted">Raw</text>
+<rect x="213.83333333333331" y="334.1610135401336" width="60.0" height="235.8389864598664" rx="10" fill="#0f766e"/>
+<text x="243.83333333333331" y="324.1610135401336" text-anchor="middle" class="small">42.5%</text>
+<text x="243.83333333333331" y="594" text-anchor="middle" class="small muted">Norm</text>
+<text x="205.83333333333331" y="624" text-anchor="middle" class="label"><tspan x="205.83333333333331" dy="0">Llama 3.2 3B</tspan><tspan x="205.83333333333331" dy="16">0-shot</tspan></text>
+<rect x="329.5" y="367.33754150621917" width="60.0" height="202.6624584937808" rx="10" fill="#cbd5e1"/>
+<text x="359.5" y="357.33754150621917" text-anchor="middle" class="small">36.6%</text>
+<text x="359.5" y="594" text-anchor="middle" class="small muted">Raw</text>
+<rect x="405.5" y="243.8380170678031" width="60.0" height="326.1619829321969" rx="10" fill="#0f766e"/>
+<text x="435.5" y="233.8380170678031" text-anchor="middle" class="small">58.8%</text>
+<text x="435.5" y="594" text-anchor="middle" class="small muted">Norm</text>
+<text x="397.5" y="624" text-anchor="middle" class="label"><tspan x="397.5" dy="0">Llama 3.2 3B</tspan><tspan x="397.5" dy="16">4-shot</tspan></text>
+<rect x="521.1666666666666" y="304.19523202712645" width="60.0" height="265.80476797287355" rx="10" fill="#cbd5e1"/>
+<text x="551.1666666666666" y="294.19523202712645" text-anchor="middle" class="small">48.0%</text>
+<text x="551.1666666666666" y="594" text-anchor="middle" class="small muted">Raw</text>
+<rect x="597.1666666666666" y="310.99132875056443" width="60.0" height="259.00867124943557" rx="10" fill="#0f766e"/>
+<text x="627.1666666666666" y="300.99132875056443" text-anchor="middle" class="small">46.7%</text>
+<text x="627.1666666666666" y="594" text-anchor="middle" class="small muted">Norm</text>
+<text x="589.1666666666666" y="624" text-anchor="middle" class="label"><tspan x="589.1666666666666" dy="0">Llama 3.2 3B</tspan><tspan x="589.1666666666666" dy="16">SFT</tspan></text>
+<rect x="712.8333333333333" y="391.0744233463373" width="60.0" height="178.9255766536627" rx="10" fill="#cbd5e1"/>
+<text x="742.8333333333333" y="381.0744233463373" text-anchor="middle" class="small">32.3%</text>
+<text x="742.8333333333333" y="594" text-anchor="middle" class="small muted">Raw</text>
+<rect x="788.8333333333333" y="392.72283877785014" width="60.0" height="177.27716122214983" rx="10" fill="#0f766e"/>
+<text x="818.8333333333333" y="382.72283877785014" text-anchor="middle" class="small">32.0%</text>
+<text x="818.8333333333333" y="594" text-anchor="middle" class="small muted">Norm</text>
+<text x="780.8333333333333" y="624" text-anchor="middle" class="label"><tspan x="780.8333333333333" dy="0">Gemma 3 4B</tspan><tspan x="780.8333333333333" dy="16">0-shot</tspan></text>
+<rect x="904.5" y="395.1603864444881" width="60.0" height="174.8396135555119" rx="10" fill="#cbd5e1"/>
+<text x="934.5" y="385.1603864444881" text-anchor="middle" class="small">31.5%</text>
+<text x="934.5" y="594" text-anchor="middle" class="small muted">Raw</text>
+<rect x="980.5" y="395.0273255536171" width="60.0" height="174.97267444638288" rx="10" fill="#0f766e"/>
+<text x="1010.5" y="385.0273255536171" text-anchor="middle" class="small">31.6%</text>
+<text x="1010.5" y="594" text-anchor="middle" class="small muted">Norm</text>
+<text x="972.5" y="624" text-anchor="middle" class="label"><tspan x="972.5" dy="0">Gemma 3 4B</tspan><tspan x="972.5" dy="16">4-shot</tspan></text>
+<rect x="1096.1666666666665" y="375.3642845369274" width="60.0" height="194.6357154630726" rx="10" fill="#cbd5e1"/>
+<text x="1126.1666666666665" y="365.3642845369274" text-anchor="middle" class="small">35.1%</text>
+<text x="1126.1666666666665" y="594" text-anchor="middle" class="small muted">Raw</text>
+<rect x="1172.1666666666665" y="391.20809283401377" width="60.0" height="178.7919071659862" rx="10" fill="#0f766e"/>
+<text x="1202.1666666666665" y="381.20809283401377" text-anchor="middle" class="small">32.3%</text>
+<text x="1202.1666666666665" y="594" text-anchor="middle" class="small muted">Norm</text>
+<text x="1164.1666666666665" y="624" text-anchor="middle" class="label"><tspan x="1164.1666666666665" dy="0">Gemma 3 4B</tspan><tspan x="1164.1666666666665" dy="16">SFT</tspan></text>
+<rect x="60" y="132" width="20" height="20" rx="4" fill="#cbd5e1"/>
+<text x="90" y="146" text-anchor="start" class="legend">Raw ranking</text>
+<rect x="230" y="132" width="20" height="20" rx="4" fill="#0f766e"/>
+<text x="260" y="146" text-anchor="start" class="legend">Byte-normalized ranking</text>
+</svg>
