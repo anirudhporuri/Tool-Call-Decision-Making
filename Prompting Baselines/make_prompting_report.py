@@ -69,9 +69,11 @@ RUN_PALETTE = {
     ("llama", "0-shot"): "#0f766e",
     ("llama", "4-shot"): "#14b8a6",
     ("llama", "SFT"): "#2dd4bf",
+    ("llama", "DPO"): "#0891b2",
     ("gemma", "0-shot"): "#b45309",
     ("gemma", "4-shot"): "#f59e0b",
     ("gemma", "SFT"): "#fb923c",
+    ("gemma", "DPO"): "#ea580c",
 }
 
 
@@ -591,12 +593,15 @@ def render_per_class_chart(
             line_height=16,
         )
 
-    legend_columns = 3
+    llama_runs = [run for run in runs if run.model_family == "llama"]
+    gemma_runs = [run for run in runs if run.model_family == "gemma"]
+    ordered_legend_runs = llama_runs + gemma_runs + [run for run in runs if run.model_family not in {"llama", "gemma"}]
+    legend_columns = max(4, len(llama_runs), len(gemma_runs))
     legend_x_start = 120
     legend_x_gap = (width - 240) / legend_columns
     legend_y_start = 680
     legend_row_gap = 34
-    for index, run in enumerate(runs):
+    for index, run in enumerate(ordered_legend_runs):
         legend_x = legend_x_start + (index % legend_columns) * legend_x_gap
         legend_y = legend_y_start + (index // legend_columns) * legend_row_gap
         canvas.rect(legend_x, legend_y - 14, 20, 20, fill=run_color(run), rx=4)
