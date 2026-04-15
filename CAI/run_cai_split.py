@@ -12,6 +12,7 @@ from cai_utils import (
     ensure_dir,
     heuristic_class,
     load_jsonl,
+    progress,
     save_json,
     write_jsonl,
 )
@@ -94,7 +95,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         "cannot_answer": [],
     }
     ignored = 0
-    for row in ds:
+    for row in progress(ds, total=len(ds), desc="Classifying train_pref rows", leave=False):
         label = heuristic_class(row["chosen_response"]["content"])
         if label not in pools:
             ignored += 1

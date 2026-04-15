@@ -31,24 +31,22 @@ cd CAI
 # 1. Prepare balanced source halves
 python3 run_cai_split.py --allow-hf-fallback
 
-# 2. Generate CAI-SFT data for Gemma
+# 2. Generate CAI-SFT data for Gemma (self-only by default)
 python3 run_cai_sft_data.py \
   google/gemma-3-4b-it \
   gemma \
   outputs/gemma_cai_sft_data \
   generated_datasets/train_pref_cai_sft_source.jsonl
 
-# 3. Train CAI-SFT branches
+# 3. Train the CAI-SFT self branch
 cd ../Post-Training\ Baselines
 python3 run_sft.py google/gemma-3-4b-it gemma outputs/gemma_cai_sft_self ../CAI/outputs/gemma_cai_sft_data/cai_sft_gemma_self.jsonl
-python3 run_sft.py google/gemma-3-4b-it gemma outputs/gemma_cai_sft_cross ../CAI/outputs/gemma_cai_sft_data/cai_sft_gemma_cross.jsonl
 
-# 4. Generate CAI-DPO data
+# 4. Generate CAI-DPO data (self judge by default)
 cd ../CAI
 python3 run_cai_dpo_data.py \
   ../Post-Training\ Baselines/outputs/gemma_cai_sft_self \
   gemma \
-  self \
   outputs/gemma_cai_dpo_self_data \
   generated_datasets/train_pref_cai_dpo_source.jsonl
 
@@ -64,7 +62,7 @@ cd CAI
 sbatch cai_sft_data_class.slurm google/gemma-3-4b-it gemma outputs/gemma_cai_sft_data generated_datasets/train_pref_cai_sft_source.jsonl
 
 cd CAI
-sbatch cai_dpo_data_class.slurm ../Post-Training\ Baselines/outputs/gemma_cai_sft_self gemma self outputs/gemma_cai_dpo_self_data generated_datasets/train_pref_cai_dpo_source.jsonl
+sbatch cai_dpo_data_class.slurm ../Post-Training\ Baselines/outputs/gemma_cai_sft_self gemma outputs/gemma_cai_dpo_self_data generated_datasets/train_pref_cai_dpo_source.jsonl
 ```
 
 ## Colab sketch
@@ -80,10 +78,17 @@ sbatch cai_dpo_data_class.slurm ../Post-Training\ Baselines/outputs/gemma_cai_sf
 !python3 -u run_sft.py google/gemma-3-4b-it gemma outputs/gemma_cai_sft_self ../CAI/outputs/gemma_cai_sft_data/cai_sft_gemma_self.jsonl
 
 %cd /content/Tool-Call-Decision-Making/CAI
-!python3 -u run_cai_dpo_data.py /content/Tool-Call-Decision-Making/Post-Training\ Baselines/outputs/gemma_cai_sft_self gemma self outputs/gemma_cai_dpo_self_data generated_datasets/train_pref_cai_dpo_source.jsonl
+!python3 -u run_cai_dpo_data.py /content/Tool-Call-Decision-Making/Post-Training\ Baselines/outputs/gemma_cai_sft_self gemma outputs/gemma_cai_dpo_self_data generated_datasets/train_pref_cai_dpo_source.jsonl
 
 %cd /content/Tool-Call-Decision-Making/Post-Training\ Baselines
 !python3 -u run_dpo.py /content/Tool-Call-Decision-Making/Post-Training\ Baselines/outputs/gemma_cai_sft_self gemma outputs/gemma_cai_dpo_self ../CAI/outputs/gemma_cai_dpo_self_data/cai_dpo_gemma_self.jsonl
+```
+
+Cross-model critique/judging is still available if you explicitly opt in:
+
+```bash
+python3 run_cai_sft_data.py ... --include-cross
+python3 run_cai_dpo_data.py <policy_model> <family> cross <output_dir> <source_file>
 ```
 
 All final evals should use the existing prompting baseline in 0-shot mode.

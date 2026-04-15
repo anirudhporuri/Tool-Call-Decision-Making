@@ -20,6 +20,7 @@ from cai_utils import (
     load_generation_model,
     load_jsonl,
     parse_critique_output,
+    progress,
     save_json,
     student_display_name,
     unload_model,
@@ -76,6 +77,12 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--smoke-run", action="store_true", default=env_flag("SMOKE_RUN", False))
     parser.add_argument("--dry-run-max-examples", type=int, default=env_int("DRY_RUN_MAX_EXAMPLES", 8))
     parser.add_argument("--smoke-run-max-examples", type=int, default=env_int("SMOKE_RUN_MAX_EXAMPLES", 8))
+    add_bool_flag(
+        parser,
+        "--include-cross",
+        env_flag("INCLUDE_CROSS", False),
+        "Also generate a cross-model critique/revision dataset.",
+    )
     add_bool_flag(parser, "--load-in-4bit", env_flag("LOAD_IN_4BIT", True), "Load models in 4-bit.")
     add_bool_flag(parser, "--trust-remote-code", env_flag("TRUST_REMOTE_CODE", False), "Allow custom model code.")
     args = parser.parse_args(argv)
@@ -114,6 +121,15 @@ def source_counts(rows: List[Dict[str, Any]]) -> Dict[str, int]:
         label = row["chosen_behavior_class"]
         counts[label] = counts.get(label, 0) + 1
     return counts
+
+
+def should_enforce_strict_balance(args: argparse.Namespace, max_examples: Optional[int]) -> bool:
+    return (
+        not args.dry_run
+        and not args.smoke_run
+        and args.start_index == 0
+        and max_examples is None
+    )
 
 
 def build_preview_rows(rows: List[Dict[str, Any]], args: argparse.Namespace, constitution: str) -> List[Dict[str, Any]]:
@@ -159,8 +175,15 @@ def process_revision_branch(
     max_new_tokens_critique: int,
     max_new_tokens_revision: int,
     seed: int,
+    desc: str,
 ) -> None:
-    for idx, record in enumerate(records):
+    iterator = progress(
+        enumerate(records),
+        total=len(records),
+        desc=desc,
+        leave=False,
+    )
+    for idx, record in iterator:
         user_request = record["user_request"]
         original_response = record["original_response"]
 
@@ -269,8 +292,14 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     save_json(out_dir / "run_config.json", sanitized_args_dict(args))
 
     constitution = get_constitution()
-    source_rows = select_rows(load_jsonl(args.source_file), args.start_index, resolve_max_examples(args))
-    source_balance = validate_balanced_counts(source_rows, "chosen_behavior_class")
+    max_examples = resolve_max_examples(args)
+    strict_balance = should_enforce_strict_balance(args, max_examples)
+    source_rows = select_rows(load_jsonl(args.source_file), args.start_index, max_examples)
+    source_balance = (
+        validate_balanced_counts(source_rows, "chosen_behavior_class")
+        if strict_balance
+        else source_counts(source_rows)
+    )
     cross_model_name = args.cross_model_name_or_path or DEFAULT_CROSS_MODELS[args.student_family]
 
     preview_rows = build_preview_rows(source_rows, args, constitution)
@@ -281,7 +310,8 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             "source_examples": len(source_rows),
             "source_balance": source_balance,
             "saved_preview": str(out_dir / "prompt_previews.jsonl"),
-            "cross_model_name_or_path": cross_model_name,
+            "include_cross": args.include_cross,
+            "cross_model_name_or_path": cross_model_name if args.include_cross else None,
         }
         save_json(out_dir / "dry_run_summary.json", summary)
         return
@@ -297,7 +327,14 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         load_in_4bit=args.load_in_4bit,
         trust_remote_code=args.trust_remote_code,
     )
-    for idx, row in enumerate(source_rows):
+    prompt_desc = f"{student_display} original responses"
+    iterator = progress(
+        enumerate(source_rows),
+        total=len(source_rows),
+        desc=prompt_desc,
+        leave=False,
+    )
+    for idx, row in iterator:
         policy_prompt = build_policy_prompt(args.student_family, row)
         original_response = generate_response(
             model=student_model,
@@ -336,63 +373,76 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         max_new_tokens_critique=args.critique_max_new_tokens,
         max_new_tokens_revision=args.revision_max_new_tokens,
         seed=args.seed,
+        desc=f"{student_display} self critiques/revisions",
     )
     unload_model(student_tokenizer, student_model)
 
-    cross_family = "gemma" if args.student_family == "llama" else "llama"
-    cross_tokenizer, cross_model = load_generation_model(
-        model_name_or_path=cross_model_name,
-        hf_token=args.hf_token,
-        dtype=args.dtype,
-        attn_implementation=args.attn_implementation,
-        load_in_4bit=args.load_in_4bit,
-        trust_remote_code=args.trust_remote_code,
-    )
-    process_revision_branch(
-        records=records,
-        branch_name="cross",
-        judge_model_family=cross_family,
-        tokenizer=cross_tokenizer,
-        model=cross_model,
-        constitution=constitution,
-        max_new_tokens_critique=args.critique_max_new_tokens,
-        max_new_tokens_revision=args.revision_max_new_tokens,
-        seed=args.seed + 100_000,
-    )
-    unload_model(cross_tokenizer, cross_model)
+    if args.include_cross:
+        cross_family = "gemma" if args.student_family == "llama" else "llama"
+        cross_tokenizer, cross_model = load_generation_model(
+            model_name_or_path=cross_model_name,
+            hf_token=args.hf_token,
+            dtype=args.dtype,
+            attn_implementation=args.attn_implementation,
+            load_in_4bit=args.load_in_4bit,
+            trust_remote_code=args.trust_remote_code,
+        )
+        process_revision_branch(
+            records=records,
+            branch_name="cross",
+            judge_model_family=cross_family,
+            tokenizer=cross_tokenizer,
+            model=cross_model,
+            constitution=constitution,
+            max_new_tokens_critique=args.critique_max_new_tokens,
+            max_new_tokens_revision=args.revision_max_new_tokens,
+            seed=args.seed + 100_000,
+            desc=f"{student_display} cross critiques/revisions",
+        )
+        unload_model(cross_tokenizer, cross_model)
 
     master_path = out_dir / "master_records.jsonl"
     write_jsonl(master_path, records)
 
     self_rows = export_branch_rows(records, "self", args.student_family)
-    cross_rows = export_branch_rows(records, "cross", args.student_family)
     self_path = out_dir / f"cai_sft_{args.student_family}_self.jsonl"
-    cross_path = out_dir / f"cai_sft_{args.student_family}_cross.jsonl"
     write_jsonl(self_path, self_rows)
-    write_jsonl(cross_path, cross_rows)
+    cross_rows: List[Dict[str, Any]] = []
+    cross_path: Optional[Path] = None
+    if args.include_cross:
+        cross_rows = export_branch_rows(records, "cross", args.student_family)
+        cross_path = out_dir / f"cai_sft_{args.student_family}_cross.jsonl"
+        write_jsonl(cross_path, cross_rows)
 
     summary = {
         "student_family": args.student_family,
         "student_model_name_or_path": args.student_model_name_or_path,
-        "cross_model_name_or_path": cross_model_name,
+        "include_cross": args.include_cross,
+        "cross_model_name_or_path": cross_model_name if args.include_cross else None,
         "source_examples": len(source_rows),
         "source_balance": source_balance,
+        "strict_balance_enforced": strict_balance,
         "outputs": {
             "master_records": str(master_path),
             "self_dataset": str(self_path),
-            "cross_dataset": str(cross_path),
+            "cross_dataset": str(cross_path) if cross_path is not None else None,
         },
         "self": summarize_branch(records, "self"),
-        "cross": summarize_branch(records, "cross"),
+        "cross": summarize_branch(records, "cross") if args.include_cross else None,
     }
     save_json(out_dir / "summary.json", summary)
 
-    self_counts = validate_balanced_counts(self_rows, "behavior_class")
-    cross_counts = validate_balanced_counts(cross_rows, "behavior_class")
-    if self_counts != source_balance or cross_counts != source_balance:
+    self_counts = validate_balanced_counts(self_rows, "behavior_class") if self_rows else {}
+    cross_counts = validate_balanced_counts(cross_rows, "behavior_class") if cross_rows else {}
+    if strict_balance and self_counts != source_balance:
         raise RuntimeError(
             f"Generated CAI SFT datasets are not fully balanced/valid. "
-            f"source={source_balance}, self={self_counts}, cross={cross_counts}"
+            f"source={source_balance}, self={self_counts}"
+        )
+    if strict_balance and args.include_cross and cross_counts != source_balance:
+        raise RuntimeError(
+            f"Generated CAI SFT cross dataset is not fully balanced/valid. "
+            f"source={source_balance}, cross={cross_counts}"
         )
 
 

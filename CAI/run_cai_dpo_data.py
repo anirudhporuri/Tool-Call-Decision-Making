@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
@@ -20,6 +21,7 @@ from cai_utils import (
     load_generation_model,
     load_jsonl,
     parse_preference_output,
+    progress,
     save_json,
     unload_model,
     validate_balanced_counts,
@@ -51,13 +53,17 @@ def add_bool_flag(parser: argparse.ArgumentParser, name: str, default: bool, hel
 
 
 def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
+    raw_argv = list(argv) if argv is not None else sys.argv[1:]
+    if len(raw_argv) >= 4 and raw_argv[2] not in {"self", "cross"} and not raw_argv[2].startswith("-"):
+        raw_argv = raw_argv[:2] + ["self"] + raw_argv[2:]
+
     parser = argparse.ArgumentParser(
         description="Generate CAI DPO training data from AI preferences.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument("policy_model_name_or_path")
     parser.add_argument("student_family", choices=["llama", "gemma"])
-    parser.add_argument("judge_mode", choices=["self", "cross"])
+    parser.add_argument("judge_mode", nargs="?", choices=["self", "cross"], default="self")
     parser.add_argument("output_dir")
     parser.add_argument("source_file")
     parser.add_argument("--judge-model-name-or-path", default=None)
@@ -77,7 +83,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--smoke-run-max-examples", type=int, default=env_int("SMOKE_RUN_MAX_EXAMPLES", 8))
     add_bool_flag(parser, "--load-in-4bit", env_flag("LOAD_IN_4BIT", True), "Load models in 4-bit.")
     add_bool_flag(parser, "--trust-remote-code", env_flag("TRUST_REMOTE_CODE", False), "Allow custom model code.")
-    args = parser.parse_args(argv)
+    args = parser.parse_args(raw_argv)
     if args.dry_run and args.smoke_run:
         parser.error("--dry-run and --smoke-run are mutually exclusive.")
     return args
@@ -105,6 +111,23 @@ def select_rows(rows: List[Dict[str, Any]], start_index: int, max_examples: Opti
     if max_examples is not None:
         selected = selected[:max_examples]
     return selected
+
+
+def source_counts(rows: List[Dict[str, Any]]) -> Dict[str, int]:
+    counts: Dict[str, int] = {}
+    for row in rows:
+        label = row["chosen_behavior_class"]
+        counts[label] = counts.get(label, 0) + 1
+    return counts
+
+
+def should_enforce_strict_balance(args: argparse.Namespace, max_examples: Optional[int]) -> bool:
+    return (
+        not args.dry_run
+        and not args.smoke_run
+        and args.start_index == 0
+        and max_examples is None
+    )
 
 
 def summarize_records(records: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -154,8 +177,14 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     save_json(out_dir / "run_config.json", sanitized_args_dict(args))
 
     constitution = get_constitution()
-    source_rows = select_rows(load_jsonl(args.source_file), args.start_index, resolve_max_examples(args))
-    source_balance = validate_balanced_counts(source_rows, "chosen_behavior_class")
+    max_examples = resolve_max_examples(args)
+    strict_balance = should_enforce_strict_balance(args, max_examples)
+    source_rows = select_rows(load_jsonl(args.source_file), args.start_index, max_examples)
+    source_balance = (
+        validate_balanced_counts(source_rows, "chosen_behavior_class")
+        if strict_balance
+        else source_counts(source_rows)
+    )
 
     default_judge = (
         DEFAULT_SELF_MODELS[args.student_family]
@@ -206,7 +235,13 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         load_in_4bit=args.load_in_4bit,
         trust_remote_code=args.trust_remote_code,
     )
-    for idx, row in enumerate(source_rows):
+    iterator = progress(
+        enumerate(source_rows),
+        total=len(source_rows),
+        desc=f"{args.student_family} policy samples",
+        leave=False,
+    )
+    for idx, row in iterator:
         policy_prompt = build_policy_prompt(args.student_family, row)
         response_a_raw = generate_response(
             model=policy_model,
@@ -255,7 +290,13 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         load_in_4bit=args.load_in_4bit,
         trust_remote_code=args.trust_remote_code,
     )
-    for idx, record in enumerate(records):
+    iterator = progress(
+        enumerate(records),
+        total=len(records),
+        desc=f"{args.student_family} {args.judge_mode} preferences",
+        leave=False,
+    )
+    for idx, record in iterator:
         if record["response_a"] == record["response_b"]:
             record["preference"] = {"valid": False, "winner": None, "reason": None, "raw_text": ""}
             record["valid"] = False
@@ -314,6 +355,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         "judge_model_name_or_path": judge_model_name,
         "source_examples": len(source_rows),
         "source_balance": source_balance,
+        "strict_balance_enforced": strict_balance,
         "outputs": {
             "master_records": str(master_path),
             "export_dataset": str(export_path),
@@ -322,8 +364,8 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     }
     save_json(out_dir / "summary.json", summary)
 
-    export_counts = validate_balanced_counts(export_rows, "behavior_class")
-    if export_counts != source_balance:
+    export_counts = validate_balanced_counts(export_rows, "behavior_class") if export_rows else {}
+    if strict_balance and export_counts != source_balance:
         raise RuntimeError(
             f"Generated CAI DPO dataset is not fully balanced/valid. "
             f"source={source_balance}, export={export_counts}"

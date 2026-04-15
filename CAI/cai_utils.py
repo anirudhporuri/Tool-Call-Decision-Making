@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import copy
 import gc
 import json
 import re
@@ -85,6 +86,15 @@ def write_jsonl(path: str | Path, rows: Iterable[Dict[str, Any]]) -> None:
     with Path(path).open("w", encoding="utf-8") as handle:
         for row in rows:
             handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+
+def progress(iterable: Iterable[Any], **kwargs: Any) -> Iterable[Any]:
+    try:
+        from tqdm.auto import tqdm
+
+        return tqdm(iterable, dynamic_ncols=True, **kwargs)
+    except Exception:
+        return iterable
 
 
 def load_template(name: str) -> str:
@@ -366,15 +376,24 @@ def generate_response(
     device = _model_device(model)
     inputs = _prepare_inputs(tokenizer, prompt, model_family, device)
     prompt_len = int(inputs["input_ids"].shape[1])
+    generation_config = copy.deepcopy(model.generation_config)
+    generation_config.do_sample = do_sample
+    if do_sample:
+        generation_config.temperature = temperature if temperature is not None else 1.0
+        generation_config.top_p = top_p if top_p is not None else 1.0
+    else:
+        if hasattr(generation_config, "temperature"):
+            generation_config.temperature = None
+        if hasattr(generation_config, "top_p"):
+            generation_config.top_p = None
+        if hasattr(generation_config, "top_k"):
+            generation_config.top_k = None
     generation_kwargs: Dict[str, Any] = {
         "max_new_tokens": max_new_tokens,
         "pad_token_id": tokenizer.pad_token_id,
         "eos_token_id": tokenizer.eos_token_id,
-        "do_sample": do_sample,
+        "generation_config": generation_config,
     }
-    if do_sample:
-        generation_kwargs["temperature"] = temperature if temperature is not None else 1.0
-        generation_kwargs["top_p"] = top_p if top_p is not None else 1.0
 
     with torch.no_grad():
         generated = model.generate(**inputs, **generation_kwargs)
