@@ -16,6 +16,7 @@ from cai_utils import (
     format_conversation,
     generate_response,
     get_constitution,
+    has_tool_call_marker,
     heuristic_class,
     load_generation_model,
     load_jsonl,
@@ -25,6 +26,7 @@ from cai_utils import (
     student_display_name,
     unload_model,
     validate_balanced_counts,
+    validate_single_tool_call,
     write_jsonl,
 )
 
@@ -76,7 +78,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--dry-run", action="store_true", default=env_flag("DRY_RUN", False))
     parser.add_argument("--smoke-run", action="store_true", default=env_flag("SMOKE_RUN", False))
     parser.add_argument("--dry-run-max-examples", type=int, default=env_int("DRY_RUN_MAX_EXAMPLES", 8))
-    parser.add_argument("--smoke-run-max-examples", type=int, default=env_int("SMOKE_RUN_MAX_EXAMPLES", 8))
+    parser.add_argument("--smoke-run-max-examples", type=int, default=env_int("SMOKE_RUN_MAX_EXAMPLES", 6))
     add_bool_flag(
         parser,
         "--include-cross",
@@ -95,6 +97,8 @@ def sanitized_args_dict(args: argparse.Namespace) -> Dict[str, Any]:
     payload = vars(args).copy()
     if payload.get("hf_token"):
         payload["hf_token"] = "[REDACTED]"
+    if not payload.get("include_cross"):
+        payload.pop("cross_model_name_or_path", None)
     return payload
 
 
@@ -113,6 +117,27 @@ def select_rows(rows: List[Dict[str, Any]], start_index: int, max_examples: Opti
     if max_examples is not None:
         selected = selected[:max_examples]
     return selected
+
+
+def select_smoke_rows(rows: List[Dict[str, Any]], start_index: int, per_class: int = 2) -> List[Dict[str, Any]]:
+    selected = rows[start_index:]
+    ordered_labels = ["tool_call", "request_for_info", "cannot_answer"]
+    buckets: Dict[str, List[Dict[str, Any]]] = {label: [] for label in ordered_labels}
+    for row in selected:
+        label = row["chosen_behavior_class"]
+        if label in buckets and len(buckets[label]) < per_class:
+            buckets[label].append(row)
+
+    missing = [label for label, bucket in buckets.items() if len(bucket) < per_class]
+    if missing:
+        raise ValueError(
+            f"Smoke run needs {per_class} examples per class, but could not satisfy: {missing}"
+        )
+
+    result: List[Dict[str, Any]] = []
+    for label in ordered_labels:
+        result.extend(buckets[label])
+    return result
 
 
 def source_counts(rows: List[Dict[str, Any]]) -> Dict[str, int]:
@@ -208,6 +233,44 @@ def build_fallback_critique_text(raw_attempts: List[str], parsed_attempts: List[
     return "\n".join(lines)
 
 
+def evaluate_candidate_response(response_text: str, tools: Any) -> Dict[str, Any]:
+    canonical = canonicalize_assistant_response(response_text)
+    response_class = heuristic_class(canonical)
+    tool_call_like = has_tool_call_marker(response_text) or has_tool_call_marker(canonical)
+    tool_validation = validate_single_tool_call(canonical, tools)
+
+    if not canonical:
+        valid = False
+        reason = "empty_response"
+        score = 0
+        structural_kind = "empty"
+    elif tool_validation["valid"]:
+        valid = True
+        reason = None
+        score = 2
+        structural_kind = "valid_tool_call"
+    elif tool_call_like:
+        valid = False
+        reason = tool_validation["reason"]
+        score = 0
+        structural_kind = "invalid_tool_call"
+    else:
+        valid = True
+        reason = None
+        score = 1
+        structural_kind = "plain_text"
+
+    return {
+        "canonical": canonical,
+        "class": response_class,
+        "valid": valid,
+        "reason": reason,
+        "score": score,
+        "structural_kind": structural_kind,
+        "tool_validation": tool_validation,
+    }
+
+
 def process_revision_branch(
     *,
     records: List[Dict[str, Any]],
@@ -300,14 +363,33 @@ def process_revision_branch(
                 seed=seed + 10_000 + idx,
             )
 
-        revision = canonicalize_assistant_response(revision_raw)
-        revision_class = heuristic_class(revision)
-        valid = bool(revision) and revision_class == record["chosen_behavior_class"]
+        original_eval = evaluate_candidate_response(original_response, record["tools"])
+        revision_eval = evaluate_candidate_response(revision_raw, record["tools"])
+
+        if original_eval["score"] > revision_eval["score"]:
+            selected_response = original_eval["canonical"]
+            selected_class = original_eval["class"]
+            selected_valid = original_eval["valid"]
+            selection_source = "original"
+            selection_reason = f"preserved_original:{revision_eval['structural_kind']}:{revision_eval['reason']}"
+        elif revision_eval["score"] > original_eval["score"]:
+            selected_response = revision_eval["canonical"]
+            selected_class = revision_eval["class"]
+            selected_valid = revision_eval["valid"]
+            selection_source = "revision"
+            selection_reason = "used_revision" if revision_eval["valid"] else f"invalid_revision:{revision_eval['reason']}"
+        else:
+            selected_response = original_eval["canonical"]
+            selected_class = original_eval["class"]
+            selected_valid = original_eval["valid"]
+            selection_source = "original"
+            selection_reason = f"preserved_original:tie:{original_eval['structural_kind']}"
+
         failure_reason = None
-        if not revision:
+        if not selected_response:
             failure_reason = "empty_revision"
-        elif revision_class != record["chosen_behavior_class"]:
-            failure_reason = f"class_mismatch:{revision_class}"
+        elif not selected_valid:
+            failure_reason = selection_reason
 
         record[f"critique_{branch_name}"] = parsed
         record[f"critique_{branch_name}_attempts"] = len(critique_attempts)
@@ -319,9 +401,21 @@ def process_revision_branch(
         record[f"critique_{branch_name}_fallback_used"] = critique_fallback_used
         record[f"critique_{branch_name}_effective_text"] = effective_critique_text
         record[f"revision_{branch_name}_raw"] = revision_raw
-        record[f"revision_{branch_name}"] = revision
-        record[f"revision_{branch_name}_class"] = revision_class
-        record[f"revision_{branch_name}_valid"] = valid
+        record[f"original_{branch_name}_canonical"] = original_eval["canonical"]
+        record[f"original_{branch_name}_class"] = original_eval["class"]
+        record[f"original_{branch_name}_valid"] = original_eval["valid"]
+        record[f"original_{branch_name}_validation_reason"] = original_eval["reason"]
+        record[f"original_{branch_name}_structural_kind"] = original_eval["structural_kind"]
+        record[f"revision_{branch_name}_candidate"] = revision_eval["canonical"]
+        record[f"revision_{branch_name}_candidate_class"] = revision_eval["class"]
+        record[f"revision_{branch_name}_candidate_valid"] = revision_eval["valid"]
+        record[f"revision_{branch_name}_candidate_validation_reason"] = revision_eval["reason"]
+        record[f"revision_{branch_name}_candidate_structural_kind"] = revision_eval["structural_kind"]
+        record[f"revision_{branch_name}"] = selected_response
+        record[f"revision_{branch_name}_class"] = selected_class
+        record[f"revision_{branch_name}_valid"] = selected_valid
+        record[f"revision_{branch_name}_selected_source"] = selection_source
+        record[f"revision_{branch_name}_selection_reason"] = selection_reason
         record[f"revision_{branch_name}_failure_reason"] = failure_reason
 
 
@@ -352,6 +446,7 @@ def summarize_branch(records: List[Dict[str, Any]], branch_name: str) -> Dict[st
     critique_missing_field_counts: Dict[str, int] = {}
     retry_count = 0
     fallback_count = 0
+    preserved_original_rows = 0
     first_try_format_fail_rows = 0
     final_format_fail_rows = 0
     invalid_attempt_total = 0
@@ -369,6 +464,8 @@ def summarize_branch(records: List[Dict[str, Any]], branch_name: str) -> Dict[st
             retry_count += 1
         if record.get(f"critique_{branch_name}_fallback_used"):
             fallback_count += 1
+        if record.get(f"revision_{branch_name}_selected_source") == "original":
+            preserved_original_rows += 1
         if not record.get(f"critique_{branch_name}_first_try_valid", True):
             first_try_format_fail_rows += 1
         if not record.get(f"critique_{branch_name}_final_valid", True):
@@ -383,6 +480,7 @@ def summarize_branch(records: List[Dict[str, Any]], branch_name: str) -> Dict[st
         "failure_counts": failure_counts,
         "critique_retry_rows": retry_count,
         "critique_fallback_rows": fallback_count,
+        "preserved_original_rows": preserved_original_rows,
         "critique_first_try_format_fail_rows": first_try_format_fail_rows,
         "critique_final_format_fail_rows": final_format_fail_rows,
         "critique_invalid_attempt_total": invalid_attempt_total,
@@ -398,7 +496,11 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     constitution = get_constitution()
     max_examples = resolve_max_examples(args)
     strict_balance = should_enforce_strict_balance(args, max_examples)
-    source_rows = select_rows(load_jsonl(args.source_file), args.start_index, max_examples)
+    all_rows = load_jsonl(args.source_file)
+    if args.smoke_run and args.max_examples is None:
+        source_rows = select_smoke_rows(all_rows, args.start_index, per_class=2)
+    else:
+        source_rows = select_rows(all_rows, args.start_index, max_examples)
     source_balance = (
         validate_balanced_counts(source_rows, "chosen_behavior_class")
         if strict_balance
@@ -415,8 +517,9 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             "source_balance": source_balance,
             "saved_preview": str(out_dir / "prompt_previews.jsonl"),
             "include_cross": args.include_cross,
-            "cross_model_name_or_path": cross_model_name if args.include_cross else None,
         }
+        if args.include_cross:
+            summary["cross_model_name_or_path"] = cross_model_name
         save_json(out_dir / "dry_run_summary.json", summary)
         return
 
@@ -456,7 +559,6 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
                 "source_row_index": idx + args.start_index,
                 "student_family": args.student_family,
                 "student_model_name_or_path": args.student_model_name_or_path,
-                "cross_model_name_or_path": cross_model_name,
                 "tools": row["tools"],
                 "messages": row["messages"],
                 "chosen_behavior_class": row["chosen_behavior_class"],
@@ -466,6 +568,8 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
                 "original_response_class": heuristic_class(original_response),
             }
         )
+        if args.include_cross:
+            records[-1]["cross_model_name_or_path"] = cross_model_name
 
     process_revision_branch(
         records=records,
@@ -522,18 +626,19 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         "student_family": args.student_family,
         "student_model_name_or_path": args.student_model_name_or_path,
         "include_cross": args.include_cross,
-        "cross_model_name_or_path": cross_model_name if args.include_cross else None,
         "source_examples": len(source_rows),
         "source_balance": source_balance,
         "strict_balance_enforced": strict_balance,
         "outputs": {
             "master_records": str(master_path),
             "self_dataset": str(self_path),
-            "cross_dataset": str(cross_path) if cross_path is not None else None,
         },
         "self": summarize_branch(records, "self"),
-        "cross": summarize_branch(records, "cross") if args.include_cross else None,
     }
+    if args.include_cross:
+        summary["cross_model_name_or_path"] = cross_model_name
+        summary["outputs"]["cross_dataset"] = str(cross_path) if cross_path is not None else None
+        summary["cross"] = summarize_branch(records, "cross")
     save_json(out_dir / "summary.json", summary)
 
     self_counts = validate_balanced_counts(self_rows, "behavior_class") if self_rows else {}

@@ -80,7 +80,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--dry-run", action="store_true", default=env_flag("DRY_RUN", False))
     parser.add_argument("--smoke-run", action="store_true", default=env_flag("SMOKE_RUN", False))
     parser.add_argument("--dry-run-max-examples", type=int, default=env_int("DRY_RUN_MAX_EXAMPLES", 8))
-    parser.add_argument("--smoke-run-max-examples", type=int, default=env_int("SMOKE_RUN_MAX_EXAMPLES", 8))
+    parser.add_argument("--smoke-run-max-examples", type=int, default=env_int("SMOKE_RUN_MAX_EXAMPLES", 6))
     add_bool_flag(parser, "--load-in-4bit", env_flag("LOAD_IN_4BIT", True), "Load models in 4-bit.")
     add_bool_flag(parser, "--trust-remote-code", env_flag("TRUST_REMOTE_CODE", False), "Allow custom model code.")
     args = parser.parse_args(raw_argv)
@@ -111,6 +111,27 @@ def select_rows(rows: List[Dict[str, Any]], start_index: int, max_examples: Opti
     if max_examples is not None:
         selected = selected[:max_examples]
     return selected
+
+
+def select_smoke_rows(rows: List[Dict[str, Any]], start_index: int, per_class: int = 2) -> List[Dict[str, Any]]:
+    selected = rows[start_index:]
+    ordered_labels = ["tool_call", "request_for_info", "cannot_answer"]
+    buckets: Dict[str, List[Dict[str, Any]]] = {label: [] for label in ordered_labels}
+    for row in selected:
+        label = row["chosen_behavior_class"]
+        if label in buckets and len(buckets[label]) < per_class:
+            buckets[label].append(row)
+
+    missing = [label for label, bucket in buckets.items() if len(bucket) < per_class]
+    if missing:
+        raise ValueError(
+            f"Smoke run needs {per_class} examples per class, but could not satisfy: {missing}"
+        )
+
+    result: List[Dict[str, Any]] = []
+    for label in ordered_labels:
+        result.extend(buckets[label])
+    return result
 
 
 def source_counts(rows: List[Dict[str, Any]]) -> Dict[str, int]:
@@ -179,7 +200,11 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     constitution = get_constitution()
     max_examples = resolve_max_examples(args)
     strict_balance = should_enforce_strict_balance(args, max_examples)
-    source_rows = select_rows(load_jsonl(args.source_file), args.start_index, max_examples)
+    all_rows = load_jsonl(args.source_file)
+    if args.smoke_run and args.max_examples is None:
+        source_rows = select_smoke_rows(all_rows, args.start_index, per_class=2)
+    else:
+        source_rows = select_rows(all_rows, args.start_index, max_examples)
     source_balance = (
         validate_balanced_counts(source_rows, "chosen_behavior_class")
         if strict_balance

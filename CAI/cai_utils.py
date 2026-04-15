@@ -32,6 +32,7 @@ DEFAULT_CROSS_MODELS = {
 }
 
 TOOLCALL_RE = re.compile(r"<TOOLCALL>(.*?)</TOOLCALL>", re.DOTALL)
+ALT_TOOLCALL_RE = re.compile(r"^\[TOOLCALL\]\s*(\{.*\})\s*$", re.DOTALL)
 VERDICT_RE = re.compile(r"Verdict:\s*(NO_ISSUES|ISSUES)", re.IGNORECASE)
 PRIMARY_ISSUE_RE = re.compile(r"Primary Issue:\s*(.+)", re.IGNORECASE)
 CRITIQUE_RE = re.compile(r"Critique:\s*(.+)", re.IGNORECASE | re.DOTALL)
@@ -147,9 +148,12 @@ def extract_toolcall_payload(text: str) -> Optional[str]:
     if not isinstance(text, str):
         return None
     match = TOOLCALL_RE.search(text)
-    if not match:
-        return None
-    return match.group(1).strip()
+    if match:
+        return match.group(1).strip()
+    alt_match = ALT_TOOLCALL_RE.match(text.strip())
+    if alt_match:
+        return alt_match.group(1).strip()
+    return None
 
 
 def maybe_json_load(text: str) -> Any:
@@ -194,6 +198,39 @@ def parse_llama_single_toolcall(text: str) -> Optional[Dict[str, Any]]:
     return {"name": body.func.id, "arguments": arguments}
 
 
+def normalize_tool_call(call: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    if not isinstance(call, dict):
+        return None
+    if "name" not in call:
+        return None
+    args = call.get("arguments", call.get("parameters", {}))
+    if args is None:
+        args = {}
+    if not isinstance(args, dict):
+        return None
+    return {"name": call["name"], "arguments": args}
+
+
+def parse_single_tool_call(text: str) -> Optional[Dict[str, Any]]:
+    if not isinstance(text, str):
+        return None
+
+    stripped = text.strip()
+    if not stripped:
+        return None
+
+    payload = extract_toolcall_payload(stripped)
+    candidate = payload if payload is not None else stripped
+
+    parsed_json = maybe_json_load(candidate)
+    if isinstance(parsed_json, dict):
+        return normalize_tool_call(parsed_json)
+    if isinstance(parsed_json, list) and len(parsed_json) == 1 and isinstance(parsed_json[0], dict):
+        return normalize_tool_call(parsed_json[0])
+
+    return parse_llama_single_toolcall(candidate)
+
+
 def wrap_canonical_toolcall(call: Dict[str, Any]) -> str:
     payload = json.dumps(call, ensure_ascii=False, separators=(",", ":"))
     return f"<TOOLCALL>{payload}</TOOLCALL>"
@@ -207,37 +244,119 @@ def canonicalize_assistant_response(text: str) -> str:
     if not stripped:
         return ""
 
-    payload = extract_toolcall_payload(stripped)
-    candidate = payload if payload is not None else stripped
-
-    parsed_json = maybe_json_load(candidate)
-    if isinstance(parsed_json, dict) and "name" in parsed_json:
-        return wrap_canonical_toolcall(parsed_json)
-    if (
-        isinstance(parsed_json, list)
-        and len(parsed_json) == 1
-        and isinstance(parsed_json[0], dict)
-        and "name" in parsed_json[0]
-    ):
-        return wrap_canonical_toolcall(parsed_json[0])
-
-    parsed_llama = parse_llama_single_toolcall(candidate)
-    if parsed_llama is not None:
-        return wrap_canonical_toolcall(parsed_llama)
+    parsed_call = parse_single_tool_call(stripped)
+    if parsed_call is not None:
+        return wrap_canonical_toolcall(parsed_call)
 
     return stripped
 
 
 def has_tool_call_marker(text: str) -> bool:
     raw = text if isinstance(text, str) else ""
-    payload = extract_toolcall_payload(raw)
-    candidate = payload if payload is not None else raw.strip()
     return (
         "<TOOLCALL>" in raw
-        or candidate.startswith("{")
-        or candidate.startswith("[")
-        or parse_llama_single_toolcall(candidate) is not None
+        or "[TOOLCALL]" in raw
+        or parse_single_tool_call(raw) is not None
     )
+
+
+def _recognized_type_tokens(type_text: str) -> List[str]:
+    text = (type_text or "").lower()
+    recognized = []
+    for token in ["str", "string", "int", "integer", "float", "number", "bool", "boolean", "dict", "object", "list", "array"]:
+        if token in text:
+            recognized.append(token)
+    return recognized
+
+
+def _value_matches_type(value: Any, type_text: str) -> bool:
+    tokens = _recognized_type_tokens(type_text)
+    if not tokens:
+        return True
+    for token in tokens:
+        if token in {"str", "string"} and isinstance(value, str):
+            return True
+        if token in {"int", "integer"}:
+            if isinstance(value, int) and not isinstance(value, bool):
+                return True
+            if isinstance(value, str) and re.fullmatch(r"[-+]?\d+", value.strip()):
+                return True
+        if token in {"float", "number"}:
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                return True
+            if isinstance(value, str):
+                try:
+                    float(value.strip())
+                    return True
+                except Exception:
+                    pass
+        if token in {"bool", "boolean"}:
+            if isinstance(value, bool):
+                return True
+            if isinstance(value, str) and value.strip().lower() in {"true", "false"}:
+                return True
+        if token in {"dict", "object"} and isinstance(value, dict):
+            return True
+        if token in {"list", "array"} and isinstance(value, list):
+            return True
+    return False
+
+
+def parse_tools_spec(tools: Any) -> Dict[str, Dict[str, Any]]:
+    if isinstance(tools, str):
+        candidate = maybe_json_load(tools)
+        tool_items = candidate if isinstance(candidate, list) else []
+    elif isinstance(tools, list):
+        tool_items = tools
+    else:
+        tool_items = []
+
+    parsed_tools: Dict[str, Dict[str, Any]] = {}
+    for item in tool_items:
+        if isinstance(item, str):
+            item = maybe_json_load(item)
+        if not isinstance(item, dict) or "name" not in item:
+            continue
+        parsed_tools[str(item["name"])] = item
+    return parsed_tools
+
+
+def validate_single_tool_call(text: str, tools: Any) -> Dict[str, Any]:
+    call = parse_single_tool_call(text)
+    if call is None:
+        return {"valid": False, "reason": "not_single_tool_call", "call": None}
+
+    tool_specs = parse_tools_spec(tools)
+    tool_name = str(call["name"])
+    tool_spec = tool_specs.get(tool_name)
+    if tool_spec is None:
+        return {"valid": False, "reason": "unknown_tool", "call": call}
+
+    args = call.get("arguments", {})
+    if not isinstance(args, dict):
+        return {"valid": False, "reason": "arguments_not_object", "call": call}
+
+    params = tool_spec.get("parameters", {}) if isinstance(tool_spec.get("parameters"), dict) else {}
+    properties = params.get("properties", {}) if isinstance(params.get("properties"), dict) else {}
+    required = tool_spec.get("required", [])
+    if not isinstance(required, list):
+        required = []
+
+    missing_required = [name for name in required if name not in args]
+    if missing_required:
+        return {"valid": False, "reason": f"missing_required:{','.join(missing_required)}", "call": call}
+
+    unsupported = [name for name in args if properties and name not in properties]
+    if unsupported:
+        return {"valid": False, "reason": f"unsupported_arguments:{','.join(unsupported)}", "call": call}
+
+    for arg_name, arg_value in args.items():
+        spec = properties.get(arg_name, {})
+        spec_type = spec.get("type", "") if isinstance(spec, dict) else ""
+        if spec_type and not _value_matches_type(arg_value, spec_type):
+            return {"valid": False, "reason": f"bad_argument_type:{arg_name}", "call": call}
+
+    return {"valid": True, "reason": None, "call": call}
 
 
 def has_cannot_answer_terms(text: str) -> bool:
