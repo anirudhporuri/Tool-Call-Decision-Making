@@ -54,7 +54,7 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     p.add_argument("--per_device_train_batch_size", type=int, default=2)
     p.add_argument("--per_device_eval_batch_size", type=int, default=2)
     p.add_argument("--gradient_accumulation_steps", type=int, default=8)
-    p.add_argument("--num_train_epochs", type=float, default=2.0)
+    p.add_argument("--num_train_epochs", type=float, default=1.0)
     p.add_argument("--learning_rate", type=float, default=2e-4)
     p.add_argument("--weight_decay", type=float, default=0.0)
     p.add_argument("--warmup_steps", type=int, default=50)

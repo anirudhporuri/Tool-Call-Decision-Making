@@ -86,6 +86,17 @@ def canonical_toolcall_to_llama(text: str) -> str:
     return "[" + ", ".join(rendered_calls) + "]"
 
 
+def canonical_toolcall_to_gemma(text: str) -> str:
+    payload = extract_toolcall_payload(text) or text.strip()
+    obj = maybe_json_load(payload)
+
+    if isinstance(obj, list) and len(obj) == 1 and isinstance(obj[0], dict) and "name" in obj[0]:
+        return json.dumps(obj[0], ensure_ascii=False)
+    if isinstance(obj, dict):
+        return json.dumps(obj, ensure_ascii=False)
+    return payload
+
+
 def render_assistant_content_for_model(content: str, model_family: str) -> str:
     payload = extract_toolcall_payload(content)
     if payload is None:
@@ -93,7 +104,7 @@ def render_assistant_content_for_model(content: str, model_family: str) -> str:
     if model_family == "llama":
         return canonical_toolcall_to_llama(content)
     if model_family == "gemma":
-        return payload
+        return canonical_toolcall_to_gemma(content)
     raise ValueError(f"Unsupported model_family={model_family!r}")
 
 

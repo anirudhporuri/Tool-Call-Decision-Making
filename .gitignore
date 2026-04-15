@@ -20,6 +20,7 @@ Prompting Baselines/outputs/
 Prompting Baselines/logs/
 Post-Training Baselines/outputs/
 Post-Training Baselines/logs/
+Data_Management/generated_datasets/
 
 # Common local model / checkpoint directories
 models/

@@ -53,15 +53,25 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--dtype", default=os.getenv("DTYPE", "bfloat16"))
     parser.add_argument("--attn-implementation", default=os.getenv("ATTN_IMPL"))
     parser.add_argument("--val-size", type=float, default=env_float("VAL_SIZE", 0.02))
+    parser.add_argument("--seed", type=int, default=env_int("SEED", 42))
     parser.add_argument("--max-train-samples", type=int, default=env_int("MAX_TRAIN_SAMPLES", None))
     parser.add_argument("--max-eval-samples", type=int, default=env_int("MAX_EVAL_SAMPLES", None))
     parser.add_argument("--max-steps", type=int, default=env_int("MAX_STEPS", None))
     parser.add_argument("--max-length", type=int, default=env_int("MAX_LENGTH", 2048))
-    parser.add_argument("--num-train-epochs", type=float, default=env_float("EPOCHS", 2.0))
+    parser.add_argument("--num-train-epochs", type=float, default=env_float("EPOCHS", 1.0))
     parser.add_argument("--learning-rate", type=float, default=env_float("LR", 2e-4))
+    parser.add_argument("--weight-decay", type=float, default=env_float("WEIGHT_DECAY", 0.0))
+    parser.add_argument("--warmup-steps", type=int, default=env_int("WARMUP_STEPS", 50))
     parser.add_argument("--per-device-train-batch-size", type=int, default=env_int("TRAIN_BS", 2))
     parser.add_argument("--per-device-eval-batch-size", type=int, default=env_int("EVAL_BS", 2))
     parser.add_argument("--gradient-accumulation-steps", type=int, default=env_int("GRAD_ACCUM", 8))
+    parser.add_argument("--lora-r", type=int, default=env_int("LORA_R", 16))
+    parser.add_argument("--lora-alpha", type=int, default=env_int("LORA_ALPHA", 32))
+    parser.add_argument("--lora-dropout", type=float, default=env_float("LORA_DROPOUT", 0.05))
+    parser.add_argument(
+        "--target-modules",
+        default=os.getenv("TARGET_MODULES", "q_proj,k_proj,v_proj,o_proj,gate_proj,up_proj,down_proj"),
+    )
     parser.add_argument("--logging-steps", type=int, default=env_int("LOGGING_STEPS", None))
     parser.add_argument("--eval-steps", type=int, default=env_int("EVAL_STEPS", None))
     parser.add_argument("--save-steps", type=int, default=env_int("SAVE_STEPS", None))
@@ -139,16 +149,30 @@ def build_train_argv(args: argparse.Namespace) -> List[str]:
         args.dtype,
         "--val_size",
         str(args.val_size),
+        "--seed",
+        str(args.seed),
         "--num_train_epochs",
         str(args.num_train_epochs),
         "--learning_rate",
         str(args.learning_rate),
+        "--weight_decay",
+        str(args.weight_decay),
+        "--warmup_steps",
+        str(args.warmup_steps),
         "--per_device_train_batch_size",
         str(args.per_device_train_batch_size),
         "--per_device_eval_batch_size",
         str(args.per_device_eval_batch_size),
         "--gradient_accumulation_steps",
         str(args.gradient_accumulation_steps),
+        "--lora_r",
+        str(args.lora_r),
+        "--lora_alpha",
+        str(args.lora_alpha),
+        "--lora_dropout",
+        str(args.lora_dropout),
+        "--target_modules",
+        args.target_modules,
         "--max_length",
         str(args.max_length),
         "--logging_steps",

@@ -32,7 +32,7 @@ cd "$(dirname "$0")"
 export TOKENIZERS_PARALLELISM=false
 export PYTHONUNBUFFERED=1
 
-python run_sft.py \
+python3 run_sft.py \
   "${MODEL_NAME_OR_PATH}" \
   "${MODEL_FAMILY}" \
   "${OUTPUT_DIR}" \

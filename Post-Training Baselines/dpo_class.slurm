@@ -32,7 +32,7 @@ cd "$(dirname "$0")"
 export TOKENIZERS_PARALLELISM=false
 export PYTHONUNBUFFERED=1
 
-python run_dpo.py \
+python3 run_dpo.py \
   "${MODEL_NAME_OR_PATH}" \
   "${MODEL_FAMILY}" \
   "${OUTPUT_DIR}" \
