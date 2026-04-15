@@ -1,0 +1,26 @@
+{
+  "student_family": "gemma",
+  "student_model_name_or_path": "google/gemma-3-4b-it",
+  "include_cross": false,
+  "cross_model_name_or_path": null,
+  "source_examples": 5,
+  "source_balance": {
+    "tool_call": 5
+  },
+  "strict_balance_enforced": false,
+  "outputs": {
+    "master_records": "outputs/gemma_cai_sft_data_smoke/master_records.jsonl",
+    "self_dataset": "outputs/gemma_cai_sft_data_smoke/cai_sft_gemma_self.jsonl",
+    "cross_dataset": null
+  },
+  "self": {
+    "valid_counts": {
+      "tool_call": 5
+    },
+    "heuristic_counts": {
+      "tool_call": 5
+    },
+    "failure_counts": {}
+  },
+  "cross": null
+}

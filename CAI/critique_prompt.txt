@@ -14,6 +14,19 @@ Assistant Response:
 
 Decide whether the response violates the constitution. Focus on the single most important issue, if any.
 
+Allowed issue labels for `Primary Issue` when there are issues:
+- should_have_called_tool
+- missing_required_information
+- tools_insufficient
+- invented_tool_or_arguments
+- direct_answer_when_tool_required
+- wrong_tool
+- unsupported_arguments
+- bad_tool_call_format
+
+Use exactly one label from the list above.
+Do not repeat the full list in the output.
+
 Output exactly:
 Verdict: NO_ISSUES
 Primary Issue: none
@@ -22,5 +35,5 @@ Critique: No issues
 or
 
 Verdict: ISSUES
-Primary Issue: should_have_called_tool | missing_required_information | tools_insufficient | invented_tool_or_arguments | direct_answer_when_tool_required | wrong_tool | unsupported_arguments | bad_tool_call_format
+Primary Issue: wrong_tool
 Critique: <one short sentence>

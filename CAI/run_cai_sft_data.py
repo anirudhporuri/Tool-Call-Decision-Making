@@ -164,6 +164,50 @@ def build_preview_rows(rows: List[Dict[str, Any]], args: argparse.Namespace, con
     return preview_rows
 
 
+def critique_missing_fields(parsed: Dict[str, Any]) -> List[str]:
+    missing: List[str] = []
+    if parsed.get("verdict") not in {"NO_ISSUES", "ISSUES"}:
+        missing.append("Verdict")
+    if parsed.get("primary_issue") is None:
+        missing.append("Primary Issue")
+    elif parsed.get("verdict") == "NO_ISSUES" and parsed.get("primary_issue") != "none":
+        missing.append("Primary Issue")
+    elif parsed.get("verdict") == "ISSUES" and not parsed.get("valid"):
+        missing.append("Primary Issue")
+    if not parsed.get("critique"):
+        missing.append("Critique")
+    return missing
+
+
+def build_fallback_critique_text(raw_attempts: List[str], parsed_attempts: List[Dict[str, Any]]) -> str:
+    non_empty_attempts = [text.strip() for text in raw_attempts if text and text.strip()]
+    if not non_empty_attempts:
+        return (
+            "Critique parsing failed after two attempts.\n"
+            "Missing or invalid fields: Verdict, Primary Issue, Critique.\n"
+            "Use the constitution to rewrite the response correctly."
+        )
+
+    missing_fields = sorted(
+        {
+            field
+            for parsed in parsed_attempts
+            if not parsed.get("valid")
+            for field in critique_missing_fields(parsed)
+        }
+    )
+    fields_text = ", ".join(missing_fields) if missing_fields else "unknown"
+    lines = [
+        "Critique parsing failed after two attempts.",
+        f"Missing or invalid fields: {fields_text}.",
+        "Use the constitution and any useful critique content below to rewrite the response correctly.",
+    ]
+    for attempt_idx, text in enumerate(non_empty_attempts, start=1):
+        lines.append(f"Attempt {attempt_idx} raw critique:")
+        lines.append(text)
+    return "\n".join(lines)
+
+
 def process_revision_branch(
     *,
     records: List[Dict[str, Any]],
@@ -203,18 +247,48 @@ def process_revision_branch(
             do_sample=False,
             seed=seed + idx,
         )
-        parsed = parse_critique_output(critique_raw)
+        critique_attempts = [critique_raw]
+        parsed_attempts = [parse_critique_output(critique_raw)]
+        parsed = parsed_attempts[-1]
+        if not parsed["valid"]:
+            critique_retry_raw = generate_response(
+                model=model,
+                tokenizer=tokenizer,
+                prompt=critique_prompt,
+                model_family=judge_model_family,
+                max_new_tokens=max_new_tokens_critique,
+                do_sample=False,
+                seed=seed + 1_000_000 + idx,
+            )
+            critique_attempts.append(critique_retry_raw)
+            parsed_attempts.append(parse_critique_output(critique_retry_raw))
+            if parsed_attempts[-1]["valid"]:
+                parsed = parsed_attempts[-1]
+
+        critique_fallback_used = not parsed["valid"]
+        critique_first_try_valid = parsed_attempts[0]["valid"]
+        critique_final_valid = parsed["valid"]
+        critique_invalid_attempts = sum(1 for attempt in parsed_attempts if not attempt["valid"])
+        critique_missing_fields_all = [
+            critique_missing_fields(attempt)
+            for attempt in parsed_attempts
+        ]
+        effective_critique_text = (
+            parsed["raw_text"]
+            if parsed["valid"]
+            else build_fallback_critique_text(critique_attempts, parsed_attempts)
+        )
         revision_raw = ""
         if parsed["valid"] and parsed["verdict"] == "NO_ISSUES":
             revision_raw = original_response
-        elif parsed["valid"]:
+        else:
             revision_prompt = build_revision_prompt(
                 model_family=judge_model_family,
                 constitution=constitution,
                 user_request=user_request,
                 tools=record["tools"],
                 assistant_response=original_response,
-                critique_text=parsed["raw_text"],
+                critique_text=effective_critique_text,
             )
             revision_raw = generate_response(
                 model=model,
@@ -228,16 +302,22 @@ def process_revision_branch(
 
         revision = canonicalize_assistant_response(revision_raw)
         revision_class = heuristic_class(revision)
-        valid = bool(parsed["valid"]) and bool(revision) and revision_class == record["chosen_behavior_class"]
+        valid = bool(revision) and revision_class == record["chosen_behavior_class"]
         failure_reason = None
-        if not parsed["valid"]:
-            failure_reason = "critique_parse_failed"
-        elif not revision:
+        if not revision:
             failure_reason = "empty_revision"
         elif revision_class != record["chosen_behavior_class"]:
             failure_reason = f"class_mismatch:{revision_class}"
 
         record[f"critique_{branch_name}"] = parsed
+        record[f"critique_{branch_name}_attempts"] = len(critique_attempts)
+        record[f"critique_{branch_name}_first_try_valid"] = critique_first_try_valid
+        record[f"critique_{branch_name}_final_valid"] = critique_final_valid
+        record[f"critique_{branch_name}_invalid_attempts"] = critique_invalid_attempts
+        record[f"critique_{branch_name}_missing_fields_by_attempt"] = critique_missing_fields_all
+        record[f"critique_{branch_name}_all_attempts_raw"] = critique_attempts
+        record[f"critique_{branch_name}_fallback_used"] = critique_fallback_used
+        record[f"critique_{branch_name}_effective_text"] = effective_critique_text
         record[f"revision_{branch_name}_raw"] = revision_raw
         record[f"revision_{branch_name}"] = revision
         record[f"revision_{branch_name}_class"] = revision_class
@@ -269,6 +349,12 @@ def summarize_branch(records: List[Dict[str, Any]], branch_name: str) -> Dict[st
     valid_counts: Dict[str, int] = {}
     heuristic_counts: Dict[str, int] = {}
     failure_counts: Dict[str, int] = {}
+    critique_missing_field_counts: Dict[str, int] = {}
+    retry_count = 0
+    fallback_count = 0
+    first_try_format_fail_rows = 0
+    final_format_fail_rows = 0
+    invalid_attempt_total = 0
     for record in records:
         label = record["chosen_behavior_class"]
         if record.get(f"revision_{branch_name}_valid"):
@@ -279,10 +365,28 @@ def summarize_branch(records: List[Dict[str, Any]], branch_name: str) -> Dict[st
         reason = record.get(f"revision_{branch_name}_failure_reason")
         if reason:
             failure_counts[reason] = failure_counts.get(reason, 0) + 1
+        if record.get(f"critique_{branch_name}_attempts", 1) > 1:
+            retry_count += 1
+        if record.get(f"critique_{branch_name}_fallback_used"):
+            fallback_count += 1
+        if not record.get(f"critique_{branch_name}_first_try_valid", True):
+            first_try_format_fail_rows += 1
+        if not record.get(f"critique_{branch_name}_final_valid", True):
+            final_format_fail_rows += 1
+        invalid_attempt_total += int(record.get(f"critique_{branch_name}_invalid_attempts", 0))
+        for missing_fields in record.get(f"critique_{branch_name}_missing_fields_by_attempt", []):
+            for field in missing_fields:
+                critique_missing_field_counts[field] = critique_missing_field_counts.get(field, 0) + 1
     return {
         "valid_counts": valid_counts,
         "heuristic_counts": heuristic_counts,
         "failure_counts": failure_counts,
+        "critique_retry_rows": retry_count,
+        "critique_fallback_rows": fallback_count,
+        "critique_first_try_format_fail_rows": first_try_format_fail_rows,
+        "critique_final_format_fail_rows": final_format_fail_rows,
+        "critique_invalid_attempt_total": invalid_attempt_total,
+        "critique_missing_field_counts": critique_missing_field_counts,
     }
 
 

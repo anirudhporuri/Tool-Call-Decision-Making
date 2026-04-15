@@ -38,6 +38,17 @@ CRITIQUE_RE = re.compile(r"Critique:\s*(.+)", re.IGNORECASE | re.DOTALL)
 WINNER_RE = re.compile(r"Winner:\s*([AB])", re.IGNORECASE)
 REASON_RE = re.compile(r"Reason:\s*(.+)", re.IGNORECASE | re.DOTALL)
 
+ALLOWED_PRIMARY_ISSUES = {
+    "should_have_called_tool",
+    "missing_required_information",
+    "tools_insufficient",
+    "invented_tool_or_arguments",
+    "direct_answer_when_tool_required",
+    "wrong_tool",
+    "unsupported_arguments",
+    "bad_tool_call_format",
+}
+
 CANNOT_PATTERNS = [
     r"\bsorry\b",
     r"\bapologies\b",
@@ -500,6 +511,10 @@ def parse_critique_output(text: str) -> Dict[str, Any]:
     primary_issue = primary_issue_match.group(1).strip() if primary_issue_match else None
     critique_text = critique_match.group(1).strip() if critique_match else None
     valid = verdict in {"NO_ISSUES", "ISSUES"} and primary_issue is not None and critique_text is not None
+    if valid and verdict == "NO_ISSUES":
+        valid = primary_issue == "none"
+    elif valid and verdict == "ISSUES":
+        valid = primary_issue in ALLOWED_PRIMARY_ISSUES
     return {
         "valid": valid,
         "verdict": verdict,
