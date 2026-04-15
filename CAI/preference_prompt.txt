@@ -1,0 +1,29 @@
+You are choosing the better assistant response under the Tool-Calling Constitution.
+
+Constitution:
+{{CONSTITUTION}}
+
+User Request:
+{{USER_REQUEST}}
+
+Available Tools:
+{{TOOLS}}
+
+Response A:
+{{RESPONSE_A}}
+
+Response B:
+{{RESPONSE_B}}
+
+Prefer the response that better follows the constitution.
+Break ties by preferring the shorter, clearer, and more direct correct response.
+
+Output exactly:
+Winner: A
+Reason: <one or two short sentences>
+
+or
+
+Winner: B
+Reason: <one or two short sentences>
+

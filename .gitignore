@@ -21,6 +21,9 @@ Prompting Baselines/logs/
 Post-Training Baselines/outputs/
 Post-Training Baselines/logs/
 Data_Management/generated_datasets/
+CAI/generated_datasets/
+CAI/outputs/
+CAI/logs/
 
 # Common local model / checkpoint directories
 models/

@@ -60,6 +60,10 @@ METHOD_ORDER = {
     "4-shot": 1,
     "SFT": 2,
     "DPO": 3,
+    "CAI-SFT Self": 4,
+    "CAI-SFT Cross": 5,
+    "CAI-DPO Self": 6,
+    "CAI-DPO Cross": 7,
 }
 FAMILY_ORDER = {
     "llama": 0,
@@ -70,10 +74,18 @@ RUN_PALETTE = {
     ("llama", "4-shot"): "#14b8a6",
     ("llama", "SFT"): "#2dd4bf",
     ("llama", "DPO"): "#0891b2",
+    ("llama", "CAI-SFT Self"): "#7c3aed",
+    ("llama", "CAI-SFT Cross"): "#a855f7",
+    ("llama", "CAI-DPO Self"): "#4f46e5",
+    ("llama", "CAI-DPO Cross"): "#6366f1",
     ("gemma", "0-shot"): "#b45309",
     ("gemma", "4-shot"): "#f59e0b",
     ("gemma", "SFT"): "#fb923c",
     ("gemma", "DPO"): "#ea580c",
+    ("gemma", "CAI-SFT Self"): "#7c2d12",
+    ("gemma", "CAI-SFT Cross"): "#9a3412",
+    ("gemma", "CAI-DPO Self"): "#991b1b",
+    ("gemma", "CAI-DPO Cross"): "#b91c1c",
 }
 
 
@@ -148,6 +160,14 @@ def detect_variant(run_key: str, run_config: Dict) -> str:
             str(run_config.get("model_name_or_path", "")).lower(),
         ]
     )
+    if "cai" in haystack and "dpo" in haystack and "cross" in haystack:
+        return "CAI-DPO Cross"
+    if "cai" in haystack and "dpo" in haystack and "self" in haystack:
+        return "CAI-DPO Self"
+    if "cai" in haystack and "sft" in haystack and "cross" in haystack:
+        return "CAI-SFT Cross"
+    if "cai" in haystack and "sft" in haystack and "self" in haystack:
+        return "CAI-SFT Self"
     if "dpo" in haystack:
         return "DPO"
     if "sft" in haystack:

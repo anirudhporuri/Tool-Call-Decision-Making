@@ -1,0 +1,23 @@
+You are revising an assistant response to follow the Tool-Calling Constitution.
+
+Constitution:
+{{CONSTITUTION}}
+
+User Request:
+{{USER_REQUEST}}
+
+Available Tools:
+{{TOOLS}}
+
+Original Response:
+{{ASSISTANT_RESPONSE}}
+
+Critique:
+{{CRITIQUE}}
+
+Rewrite the response so it follows the constitution.
+
+If the correct output is a tool call, use exactly:
+<TOOLCALL>{"name":"tool_name","arguments":{...}}</TOOLCALL>
+
+Output only the revised response.

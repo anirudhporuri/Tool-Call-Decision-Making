@@ -1,0 +1,26 @@
+You are checking an assistant response against the Tool-Calling Constitution.
+
+Constitution:
+{{CONSTITUTION}}
+
+User Request:
+{{USER_REQUEST}}
+
+Available Tools:
+{{TOOLS}}
+
+Assistant Response:
+{{ASSISTANT_RESPONSE}}
+
+Decide whether the response violates the constitution. Focus on the single most important issue, if any.
+
+Output exactly:
+Verdict: NO_ISSUES
+Primary Issue: none
+Critique: No issues
+
+or
+
+Verdict: ISSUES
+Primary Issue: should_have_called_tool | missing_required_information | tools_insufficient | invented_tool_or_arguments | direct_answer_when_tool_required | wrong_tool | unsupported_arguments | bad_tool_call_format
+Critique: <one short sentence>
