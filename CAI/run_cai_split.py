@@ -2,18 +2,22 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from datasets import load_dataset, load_from_disk
 
 from cai_utils import (
+    canonicalize_assistant_response,
     ensure_dir,
     heuristic_class,
     load_jsonl,
+    parse_tools_spec,
     progress,
     save_json,
+    validate_single_tool_call,
     write_jsonl,
 )
 
@@ -84,36 +88,87 @@ def row_with_metadata(row: Dict[str, Any], chosen_behavior_class: str) -> Dict[s
     return payload
 
 
+def normalized_key(row: Dict[str, Any]) -> Tuple[str, str]:
+    user_request = ""
+    messages = row.get("messages") or []
+    if messages:
+        user_request = str(messages[0].get("content", "")).strip()
+
+    parsed_tools = parse_tools_spec(row.get("tools"))
+    tools_key = json.dumps(parsed_tools, ensure_ascii=False, sort_keys=True)
+    return user_request, tools_key
+
+
+def rejected_response_is_valid_tool_call(row: Dict[str, Any]) -> bool:
+    rejected = str(row.get("rejected_response", {}).get("content", "")).strip()
+    canonical = canonicalize_assistant_response(rejected)
+    validation = validate_single_tool_call(canonical, row.get("tools"))
+    return bool(validation.get("valid"))
+
+
 def main(argv: Optional[Sequence[str]] = None) -> None:
     args = parse_args(argv)
     output_dir = ensure_dir(args.output_dir)
     ds = load_source_dataset(args)
+
+    raw_pools: Dict[str, List[Dict[str, Any]]] = {
+        "tool_call": [],
+        "request_for_info": [],
+        "cannot_answer": [],
+    }
+    rows_by_key: Dict[Tuple[str, str], List[Dict[str, Any]]] = {}
+    ignored = 0
+    for row in progress(ds, total=len(ds), desc="Classifying train_pref rows", leave=False):
+        label = heuristic_class(row["chosen_response"]["content"])
+        if label not in raw_pools:
+            ignored += 1
+            continue
+        payload = row_with_metadata(row, label)
+        raw_pools[label].append(payload)
+        key = normalized_key(payload)
+        rows_by_key.setdefault(key, []).append(payload)
+
+    original_counts = {label: len(rows) for label, rows in raw_pools.items()}
+
+    conflicting_key_count = 0
+    conflicting_row_counts = {label: 0 for label in raw_pools}
+    conflicting_keys: set[Tuple[str, str]] = set()
+    for key, rows in rows_by_key.items():
+        labels = {str(row["chosen_behavior_class"]) for row in rows}
+        if len(labels) > 1:
+            conflicting_key_count += 1
+            conflicting_keys.add(key)
+            for row in rows:
+                conflicting_row_counts[str(row["chosen_behavior_class"])] += 1
 
     pools: Dict[str, List[Dict[str, Any]]] = {
         "tool_call": [],
         "request_for_info": [],
         "cannot_answer": [],
     }
-    ignored = 0
-    for row in progress(ds, total=len(ds), desc="Classifying train_pref rows", leave=False):
-        label = heuristic_class(row["chosen_response"]["content"])
-        if label not in pools:
-            ignored += 1
-            continue
-        pools[label].append(row_with_metadata(row, label))
+    valid_tool_rejected_rfi_drop_count = 0
+    for label, rows in raw_pools.items():
+        for row in rows:
+            key = normalized_key(row)
+            if key in conflicting_keys:
+                continue
+            if label == "request_for_info" and rejected_response_is_valid_tool_call(row):
+                valid_tool_rejected_rfi_drop_count += 1
+                continue
+            pools[label].append(row)
 
-    original_counts = {label: len(rows) for label, rows in pools.items()}
-    min_count = min(original_counts.values())
+    eligible_counts = {label: len(rows) for label, rows in pools.items()}
+    min_count = min(eligible_counts.values())
     auto_total = min_count - (min_count % 2)
     if auto_total <= 0:
-        raise ValueError(f"Unable to form an even balanced split from counts: {original_counts}")
+        raise ValueError(f"Unable to form an even balanced split from counts: {eligible_counts}")
 
     per_class_total = args.per_class_total or auto_total
     if per_class_total % 2 != 0:
         raise ValueError("--per-class-total must be even.")
-    if any(per_class_total > count for count in original_counts.values()):
+    if any(per_class_total > count for count in eligible_counts.values()):
         raise ValueError(
-            f"Requested per-class-total={per_class_total}, but source counts are {original_counts}."
+            f"Requested per-class-total={per_class_total}, but eligible counts are {eligible_counts}."
         )
 
     per_half = per_class_total // 2
@@ -153,6 +208,12 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         "seed": args.seed,
         "ignored_rows": ignored,
         "original_counts": original_counts,
+        "filtering": {
+            "conflicting_key_count": conflicting_key_count,
+            "conflicting_row_counts": conflicting_row_counts,
+            "valid_tool_rejected_request_for_info_drops": valid_tool_rejected_rfi_drop_count,
+            "eligible_counts": eligible_counts,
+        },
         "per_class_total": per_class_total,
         "per_half": per_half,
         "sampling_info": sampling_info,

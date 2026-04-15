@@ -2,31 +2,34 @@
   "student_family": "llama",
   "student_model_name_or_path": "meta-llama/Llama-3.2-3B-Instruct",
   "include_cross": false,
-  "cross_model_name_or_path": null,
-  "source_examples": 5,
+  "source_examples": 6,
   "source_balance": {
-    "tool_call": 5
+    "tool_call": 2,
+    "request_for_info": 2,
+    "cannot_answer": 2
   },
   "strict_balance_enforced": false,
   "outputs": {
     "master_records": "outputs/llama_cai_sft_data_smoke/master_records.jsonl",
-    "self_dataset": "outputs/llama_cai_sft_data_smoke/cai_sft_llama_self.jsonl",
-    "cross_dataset": null
+    "self_dataset": "outputs/llama_cai_sft_data_smoke/cai_sft_llama_self.jsonl"
   },
   "self": {
     "valid_counts": {
-      "tool_call": 5
+      "tool_call": 2,
+      "request_for_info": 2,
+      "cannot_answer": 2
     },
     "heuristic_counts": {
-      "tool_call": 5
+      "tool_call": 4,
+      "other_plain_text": 2
     },
     "failure_counts": {},
     "critique_retry_rows": 0,
     "critique_fallback_rows": 0,
+    "preserved_original_rows": 6,
     "critique_first_try_format_fail_rows": 0,
     "critique_final_format_fail_rows": 0,
     "critique_invalid_attempt_total": 0,
     "critique_missing_field_counts": {}
-  },
-  "cross": null
+  }
 }

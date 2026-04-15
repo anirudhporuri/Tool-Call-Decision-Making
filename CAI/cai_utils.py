@@ -163,6 +163,18 @@ def maybe_json_load(text: str) -> Any:
         return None
 
 
+def extract_leading_json(text: str) -> Any:
+    stripped = text.strip()
+    if not stripped or stripped[0] not in {"{", "["}:
+        return None
+    try:
+        decoder = json.JSONDecoder()
+        obj, _ = decoder.raw_decode(stripped)
+        return obj
+    except Exception:
+        return None
+
+
 def _ast_literal(node: ast.AST) -> Any:
     return ast.literal_eval(node)
 
@@ -227,6 +239,12 @@ def parse_single_tool_call(text: str) -> Optional[Dict[str, Any]]:
         return normalize_tool_call(parsed_json)
     if isinstance(parsed_json, list) and len(parsed_json) == 1 and isinstance(parsed_json[0], dict):
         return normalize_tool_call(parsed_json[0])
+
+    leading_json = extract_leading_json(candidate)
+    if isinstance(leading_json, dict):
+        return normalize_tool_call(leading_json)
+    if isinstance(leading_json, list) and len(leading_json) == 1 and isinstance(leading_json[0], dict):
+        return normalize_tool_call(leading_json[0])
 
     return parse_llama_single_toolcall(candidate)
 
@@ -382,12 +400,17 @@ def heuristic_class(text: str) -> str:
 
 
 def validate_balanced_counts(rows: List[Dict[str, Any]], label_key: str) -> Dict[str, int]:
+    counts = count_label_values(rows, label_key)
+    if len(set(counts.values())) > 1:
+        raise ValueError(f"Expected balanced counts for {label_key}, found {counts}")
+    return counts
+
+
+def count_label_values(rows: List[Dict[str, Any]], label_key: str) -> Dict[str, int]:
     counts: Dict[str, int] = {}
     for row in rows:
         label = str(row[label_key])
         counts[label] = counts.get(label, 0) + 1
-    if len(set(counts.values())) > 1:
-        raise ValueError(f"Expected balanced counts for {label_key}, found {counts}")
     return counts
 
 

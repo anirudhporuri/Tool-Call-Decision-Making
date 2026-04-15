@@ -13,6 +13,7 @@ from cai_utils import (
     build_policy_prompt,
     build_preference_prompt,
     canonicalize_assistant_response,
+    count_label_values,
     ensure_dir,
     format_conversation,
     generate_response,
@@ -389,7 +390,10 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     }
     save_json(out_dir / "summary.json", summary)
 
-    export_counts = validate_balanced_counts(export_rows, "behavior_class") if export_rows else {}
+    if strict_balance:
+        export_counts = validate_balanced_counts(export_rows, "behavior_class") if export_rows else {}
+    else:
+        export_counts = count_label_values(export_rows, "behavior_class") if export_rows else {}
     if strict_balance and export_counts != source_balance:
         raise RuntimeError(
             f"Generated CAI DPO dataset is not fully balanced/valid. "

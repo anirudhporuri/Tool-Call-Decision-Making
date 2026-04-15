@@ -12,6 +12,7 @@ from cai_utils import (
     build_policy_prompt,
     build_revision_prompt,
     canonicalize_assistant_response,
+    count_label_values,
     ensure_dir,
     format_conversation,
     generate_response,
@@ -431,9 +432,6 @@ def export_branch_rows(records: List[Dict[str, Any]], branch_name: str, student_
                 + [{"role": "assistant", "content": record[f"revision_{branch_name}"]}],
                 "source_split": "cai_sft",
                 "behavior_class": record["chosen_behavior_class"],
-                "cai_student_family": student_family,
-                "cai_branch": branch_name,
-                "source_row_index": record["source_row_index"],
             }
         )
     return rows
@@ -641,8 +639,12 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         summary["cross"] = summarize_branch(records, "cross")
     save_json(out_dir / "summary.json", summary)
 
-    self_counts = validate_balanced_counts(self_rows, "behavior_class") if self_rows else {}
-    cross_counts = validate_balanced_counts(cross_rows, "behavior_class") if cross_rows else {}
+    if strict_balance:
+        self_counts = validate_balanced_counts(self_rows, "behavior_class") if self_rows else {}
+        cross_counts = validate_balanced_counts(cross_rows, "behavior_class") if cross_rows else {}
+    else:
+        self_counts = count_label_values(self_rows, "behavior_class") if self_rows else {}
+        cross_counts = count_label_values(cross_rows, "behavior_class") if cross_rows else {}
     if strict_balance and self_counts != source_balance:
         raise RuntimeError(
             f"Generated CAI SFT datasets are not fully balanced/valid. "
