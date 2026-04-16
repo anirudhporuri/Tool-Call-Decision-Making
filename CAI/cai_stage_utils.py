@@ -40,7 +40,16 @@ def load_selected_source_rows(
 ) -> List[Dict[str, Any]]:
     all_rows = load_jsonl(source_file)
     enumerated = list(enumerate(all_rows[start_index:], start=start_index))
-    if smoke_run and max_examples is None:
+    if smoke_run:
+        if max_examples is not None:
+            if max_examples <= 0:
+                raise ValueError("--max-examples must be positive when used with --smoke-run.")
+            if max_examples % len(SMOKE_LABEL_ORDER) != 0:
+                raise ValueError(
+                    f"Smoke run requires max_examples to be divisible by {len(SMOKE_LABEL_ORDER)} "
+                    f"(one equal bucket per class), got {max_examples}."
+                )
+            smoke_per_class = max_examples // len(SMOKE_LABEL_ORDER)
         buckets: Dict[str, List[tuple[int, Dict[str, Any]]]] = {label: [] for label in SMOKE_LABEL_ORDER}
         for row_index, row in enumerated:
             label = row["chosen_behavior_class"]
