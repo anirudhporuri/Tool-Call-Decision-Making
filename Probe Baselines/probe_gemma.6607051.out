@@ -10,3 +10,9 @@ Preparing When2Call test MCQ rows for probe evaluation
 Test examples (filtered to probe label space): 3652
 Saved test features to /fs/classhomes/mukunds/Tool-Call-Decision-Making/Probe Baselines/outputs/gemma3_4b_probe_base/test_features.npz
 Training multinomial logistic regression probes
+Saved probe model to /fs/classhomes/mukunds/Tool-Call-Decision-Making/Probe Baselines/outputs/gemma3_4b_probe_base/probe_model.pkl
+Running probes on test hidden states
+Probe pipeline complete
+Training summary: /fs/classhomes/mukunds/Tool-Call-Decision-Making/Probe Baselines/outputs/gemma3_4b_probe_base/probe_training_summary.json
+Evaluation summary: /fs/classhomes/mukunds/Tool-Call-Decision-Making/Probe Baselines/outputs/gemma3_4b_probe_base/probe_evaluation_summary.json
+Joined comparison rows: /fs/classhomes/mukunds/Tool-Call-Decision-Making/Probe Baselines/outputs/gemma3_4b_probe_base/probe_comparison_samples.jsonl
