@@ -1,0 +1,538 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+import os
+import shlex
+import shutil
+import socket
+import subprocess
+import sys
+from pathlib import Path
+from typing import List, Optional, Sequence
+
+try:
+    from huggingface_hub import snapshot_download
+except ImportError:  # pragma: no cover - surfaced at runtime on cluster.
+    snapshot_download = None
+
+
+SCRIPT_PATH = Path(__file__).resolve()
+DEFAULT_REPO_ROOT = Path("/fs/classhomes/mukunds/Tool-Call-Decision-Making")
+DEFAULT_SOURCE_JSONL = DEFAULT_REPO_ROOT / "Data_Management" / "generated_datasets" / "when2call_balanced_sft.jsonl"
+DEFAULT_CACHE_ROOT = DEFAULT_REPO_ROOT / "cluster_cache"
+
+
+def timestamp() -> str:
+    return subprocess.check_output(["date", "+%Y-%m-%d %H:%M:%S"], text=True).strip()
+
+
+def log(message: str) -> None:
+    print(f"[{timestamp()}] {message}", flush=True)
+
+
+def shell_join(parts: Sequence[str]) -> str:
+    return " ".join(shlex.quote(part) for part in parts)
+
+
+def env_flag(name: str, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def ensure_dir(path: Path) -> Path:
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def sanitize_model_name(model_name_or_path: str) -> str:
+    return (
+        model_name_or_path.strip()
+        .replace("/", "__")
+        .replace(":", "_")
+        .replace("@", "_")
+        .replace(" ", "_")
+    )
+
+
+def local_or_cached_model_path(model_name_or_path: str, cache_root: Path, hf_token: Optional[str]) -> str:
+    candidate = Path(model_name_or_path).expanduser()
+    if candidate.exists():
+        resolved = str(candidate.resolve())
+        log(f"Model already available locally: {resolved}")
+        return resolved
+
+    if snapshot_download is None:
+        raise ImportError("huggingface_hub is required for model prefetching.")
+
+    local_dir = ensure_dir(cache_root / sanitize_model_name(model_name_or_path))
+    log(f"Prefetching model {model_name_or_path} into {local_dir}")
+    snapshot_download(
+        repo_id=model_name_or_path,
+        local_dir=str(local_dir),
+        token=hf_token,
+        resume_download=True,
+    )
+    return str(local_dir.resolve())
+
+
+def build_launcher(mode: str) -> List[str]:
+    if mode == "direct":
+        return []
+    if mode == "srun":
+        return ["srun", "--unbuffered", "--ntasks=1"]
+    if shutil.which("srun") and os.getenv("SLURM_JOB_ID"):
+        return ["srun", "--unbuffered", "--ntasks=1"]
+    return []
+
+
+def run_step(label: str, workdir: Path, command: Sequence[str], env: dict[str, str], launcher: Sequence[str]) -> None:
+    full_cmd = [*launcher, *command]
+    log(f"START {label}")
+    log(f"WORKDIR {workdir}")
+    log(f"CMD {shell_join(full_cmd)}")
+    subprocess.run(full_cmd, cwd=str(workdir), env=env, check=True)
+    log(f"DONE {label}")
+
+
+def count_lines(path: Path) -> int:
+    with path.open("r", encoding="utf-8") as handle:
+        return sum(1 for line in handle if line.strip())
+
+
+def maybe_extend(command: List[str], flag: str, value: Optional[str]) -> None:
+    if value:
+        command.extend([flag, value])
+
+
+def add_bool_flag(parser: argparse.ArgumentParser, name: str, default: bool, help_text: str) -> None:
+    dest = name[2:].replace("-", "_")
+    parser.add_argument(name, dest=dest, action="store_true", default=default, help=help_text)
+    parser.add_argument(f"--no-{name[2:]}", dest=dest, action="store_false", help=argparse.SUPPRESS)
+
+
+def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Run the full CAI -> SFT -> Eval -> DPO pipeline on the cluster.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser.add_argument("--repo-root", default=os.getenv("W2C_REPO_ROOT", str(DEFAULT_REPO_ROOT)))
+    parser.add_argument("--source-jsonl", default=os.getenv("CAI_SOURCE_JSONL", str(DEFAULT_SOURCE_JSONL)))
+    parser.add_argument("--model-cache-dir", default=os.getenv("MODEL_CACHE_DIR", str(DEFAULT_CACHE_ROOT / "model_cache")))
+    parser.add_argument("--hf-home-dir", default=os.getenv("HF_HOME_DIR", str(DEFAULT_CACHE_ROOT / "hf_home")))
+    parser.add_argument("--base-model", required=True)
+    parser.add_argument("--base-family", required=True, choices=["llama", "gemma"])
+    parser.add_argument("--base-tag", required=True)
+    parser.add_argument("--critic-model", default=os.getenv("CRITIC_MODEL", "Qwen/Qwen3.5-9B"))
+    parser.add_argument("--critic-family", default=os.getenv("CRITIC_FAMILY", "qwen"))
+    parser.add_argument("--critic-tag", default=os.getenv("CRITIC_TAG", "qwen3p5_9b"))
+    parser.add_argument("--run-tag", default=os.getenv("RUN_TAG"))
+    parser.add_argument("--sft-model-tag", default=os.getenv("SFT_MODEL_TAG"))
+    parser.add_argument("--dpo-base-model-tag", default=os.getenv("DPO_BASE_MODEL_TAG"))
+    parser.add_argument("--dpo-sft-model-tag", default=os.getenv("DPO_SFT_MODEL_TAG"))
+    parser.add_argument("--hf-token", default=os.getenv("HF_TOKEN"))
+    parser.add_argument("--dtype", default=os.getenv("DTYPE", "bfloat16"))
+    parser.add_argument("--attn-implementation", default=os.getenv("ATTN_IMPL"))
+    parser.add_argument("--critique-max-new-tokens", type=int, default=int(os.getenv("CRITIQUE_MAX_NEW_TOKENS", "256")))
+    parser.add_argument("--judge-max-new-tokens", type=int, default=int(os.getenv("JUDGE_MAX_NEW_TOKENS", "128")))
+    parser.add_argument("--pair-temperature", type=float, default=float(os.getenv("PAIR_TEMPERATURE", "0.9")))
+    parser.add_argument("--pair-top-p", type=float, default=float(os.getenv("PAIR_TOP_P", "0.95")))
+    parser.add_argument("--pair-candidate-attempts", type=int, default=int(os.getenv("PAIR_CANDIDATE_ATTEMPTS", "6")))
+    parser.add_argument("--eval-num-shots", type=int, default=int(os.getenv("EVAL_NUM_SHOTS", "0")))
+    parser.add_argument("--launcher", choices=["auto", "srun", "direct"], default=os.getenv("W2C_LAUNCHER", "auto"))
+    add_bool_flag(parser, "--prefetch-models", env_flag("PREFETCH_MODELS", True), "Snapshot base and critic models into the local cache before running.")
+    add_bool_flag(parser, "--load-in-4bit", env_flag("LOAD_IN_4BIT", True), "Load generation and training models in 4-bit where supported.")
+    add_bool_flag(parser, "--trust-remote-code", env_flag("TRUST_REMOTE_CODE", False), "Allow custom model code in Transformers.")
+    return parser.parse_args(argv)
+
+
+def main(argv: Optional[Sequence[str]] = None) -> None:
+    args = parse_args(argv)
+
+    repo_root = Path(args.repo_root).expanduser().resolve()
+    cai_dir = repo_root / "CAI"
+    pt_dir = repo_root / "Post-Training Baselines"
+    eval_dir = repo_root / "Prompting Baselines"
+    source_jsonl = Path(args.source_jsonl).expanduser().resolve()
+    model_cache_dir = ensure_dir(Path(args.model_cache_dir).expanduser().resolve())
+    hf_home_dir = ensure_dir(Path(args.hf_home_dir).expanduser().resolve())
+
+    run_tag = args.run_tag or f"{args.base_tag}_{args.critic_tag}_full"
+    sft_model_tag = args.sft_model_tag or f"{run_tag}_sft_model"
+    dpo_base_model_tag = args.dpo_base_model_tag or f"{run_tag}_dpo_base_model"
+    dpo_sft_model_tag = args.dpo_sft_model_tag or f"{run_tag}_dpo_from_sft_model"
+
+    env = os.environ.copy()
+    env["PYTHONUNBUFFERED"] = "1"
+    env["TOKENIZERS_PARALLELISM"] = "false"
+    env["HF_HOME"] = str(hf_home_dir)
+    env.setdefault("HF_HUB_CACHE", str(hf_home_dir / "hub"))
+    env.setdefault("HF_DATASETS_CACHE", str(hf_home_dir / "datasets"))
+    env.setdefault("TRANSFORMERS_CACHE", str(hf_home_dir / "transformers"))
+    if args.hf_token:
+        env["HF_TOKEN"] = args.hf_token
+
+    launcher = build_launcher(args.launcher)
+
+    log(f"Job info: id={os.getenv('SLURM_JOB_ID', 'none')} name={os.getenv('SLURM_JOB_NAME', 'none')} host={socket.gethostname()}")
+    log(f"Repository root: {repo_root}")
+    log(f"Source JSONL: {source_jsonl}")
+    log(f"Model cache dir: {model_cache_dir}")
+    log(f"HF_HOME dir: {hf_home_dir}")
+
+    run_step("Python version", repo_root, [sys.executable, "--version"], env, [])
+    if shutil.which("nvidia-smi"):
+        run_step("GPU status", repo_root, ["nvidia-smi"], env, [])
+
+    base_model_path = args.base_model
+    critic_model_path = args.critic_model
+    if args.prefetch_models:
+        base_model_path = local_or_cached_model_path(args.base_model, model_cache_dir, args.hf_token)
+        critic_model_path = local_or_cached_model_path(args.critic_model, model_cache_dir, args.hf_token)
+
+    log(f"Base model path: {base_model_path}")
+    log(f"Critic model path: {critic_model_path}")
+    log(f"Run tag: {run_tag}")
+
+    run_step(
+        "CAI split",
+        cai_dir,
+        [
+            sys.executable,
+            "-u",
+            "run_cai_split.py",
+            "--source-jsonl",
+            str(source_jsonl),
+        ],
+        env,
+        launcher,
+    )
+
+    sft_source = cai_dir / "generated_datasets" / "train_pref_cai_sft_source.jsonl"
+    dpo_source = cai_dir / "generated_datasets" / "train_pref_cai_dpo_source.jsonl"
+    full_sft_rows = count_lines(sft_source)
+    full_dpo_rows = count_lines(dpo_source)
+    log(f"SFT source rows: {full_sft_rows}")
+    log(f"DPO source rows: {full_dpo_rows}")
+
+    common_generation_flags: List[str] = []
+    if args.load_in_4bit:
+        common_generation_flags.append("--load-in-4bit")
+    if args.trust_remote_code:
+        common_generation_flags.append("--trust-remote-code")
+    maybe_extend(common_generation_flags, "--dtype", args.dtype)
+    maybe_extend(common_generation_flags, "--attn-implementation", args.attn_implementation)
+    if args.hf_token:
+        common_generation_flags.extend(["--hf-token", args.hf_token])
+
+    run_step(
+        "SFT initial outputs",
+        cai_dir,
+        [
+            sys.executable,
+            "-u",
+            "run_cai_initial_outputs.py",
+            base_model_path,
+            args.base_family,
+            f"outputs/{run_tag}/sft_initial",
+            str(sft_source),
+            "--max-examples",
+            str(full_sft_rows),
+            *common_generation_flags,
+        ],
+        env,
+        launcher,
+    )
+
+    run_step(
+        "SFT critiques",
+        cai_dir,
+        [
+            sys.executable,
+            "-u",
+            "run_cai_critiques.py",
+            critic_model_path,
+            args.critic_family,
+            f"outputs/{run_tag}/sft_critiques",
+            str(sft_source),
+            f"outputs/{run_tag}/sft_initial/initial_outputs.jsonl",
+            "--max-examples",
+            str(full_sft_rows),
+            "--max-new-tokens",
+            str(args.critique_max_new_tokens),
+            *common_generation_flags,
+        ],
+        env,
+        launcher,
+    )
+
+    run_step(
+        "SFT revisions",
+        cai_dir,
+        [
+            sys.executable,
+            "-u",
+            "run_cai_revisions.py",
+            base_model_path,
+            args.base_family,
+            f"outputs/{run_tag}/sft_revisions",
+            str(sft_source),
+            f"outputs/{run_tag}/sft_initial/initial_outputs.jsonl",
+            f"outputs/{run_tag}/sft_critiques/critiques.jsonl",
+            "--max-examples",
+            str(full_sft_rows),
+            *common_generation_flags,
+        ],
+        env,
+        launcher,
+    )
+
+    run_step(
+        "Build CAI SFT dataset",
+        cai_dir,
+        [
+            sys.executable,
+            "-u",
+            "build_cai_sft_dataset.py",
+            f"outputs/{run_tag}/sft_dataset",
+            str(sft_source),
+            f"outputs/{run_tag}/sft_initial/initial_outputs.jsonl",
+            f"outputs/{run_tag}/sft_critiques/critiques.jsonl",
+            f"outputs/{run_tag}/sft_revisions/revisions.jsonl",
+            "--max-examples",
+            str(full_sft_rows),
+        ],
+        env,
+        launcher,
+    )
+    log(f"CAI SFT dataset rows: {count_lines(cai_dir / 'outputs' / run_tag / 'sft_dataset' / 'cai_sft_dataset.jsonl')}")
+
+    training_flags: List[str] = []
+    if args.load_in_4bit:
+        training_flags.append("--load-in-4bit")
+    if args.trust_remote_code:
+        training_flags.append("--trust-remote-code")
+    maybe_extend(training_flags, "--dtype", args.dtype)
+    maybe_extend(training_flags, "--attn-implementation", args.attn_implementation)
+    if args.hf_token:
+        training_flags.extend(["--hf-token", args.hf_token])
+
+    run_step(
+        "Train SFT adapter",
+        pt_dir,
+        [
+            sys.executable,
+            "-u",
+            "run_sft.py",
+            base_model_path,
+            args.base_family,
+            f"outputs/{sft_model_tag}",
+            str(cai_dir / "outputs" / run_tag / "sft_dataset" / "cai_sft_dataset.jsonl"),
+            *training_flags,
+        ],
+        env,
+        launcher,
+    )
+
+    eval_flags: List[str] = []
+    if args.trust_remote_code:
+        eval_flags.append("--trust-remote-code")
+    maybe_extend(eval_flags, "--dtype", args.dtype)
+    maybe_extend(eval_flags, "--attn-implementation", args.attn_implementation)
+    if args.hf_token:
+        eval_flags.extend(["--hf-token", args.hf_token])
+
+    run_step(
+        "Eval SFT adapter",
+        eval_dir,
+        [
+            sys.executable,
+            "-u",
+            "run_eval.py",
+            str(pt_dir / "outputs" / sft_model_tag),
+            args.base_family,
+            str(args.eval_num_shots),
+            f"outputs/{sft_model_tag}_eval",
+            *eval_flags,
+        ],
+        env,
+        launcher,
+    )
+
+    run_step(
+        "DPO response pairs from base model",
+        cai_dir,
+        [
+            sys.executable,
+            "-u",
+            "run_cai_response_pairs.py",
+            base_model_path,
+            args.base_family,
+            f"outputs/{run_tag}/dpo_base_pairs",
+            str(dpo_source),
+            "--max-examples",
+            str(full_dpo_rows),
+            "--temperature",
+            str(args.pair_temperature),
+            "--top-p",
+            str(args.pair_top_p),
+            "--candidate-attempts",
+            str(args.pair_candidate_attempts),
+            *common_generation_flags,
+        ],
+        env,
+        launcher,
+    )
+
+    run_step(
+        "Judge DPO base pairs",
+        cai_dir,
+        [
+            sys.executable,
+            "-u",
+            "run_cai_preferences.py",
+            critic_model_path,
+            args.critic_family,
+            f"outputs/{run_tag}/dpo_base_dataset",
+            str(dpo_source),
+            f"outputs/{run_tag}/dpo_base_pairs/response_pairs.jsonl",
+            "--max-examples",
+            str(full_dpo_rows),
+            "--max-new-tokens",
+            str(args.judge_max_new_tokens),
+            *common_generation_flags,
+        ],
+        env,
+        launcher,
+    )
+    log(f"CAI DPO base dataset rows: {count_lines(cai_dir / 'outputs' / run_tag / 'dpo_base_dataset' / 'cai_dpo_dataset.jsonl')}")
+
+    run_step(
+        "Train DPO adapter from base model",
+        pt_dir,
+        [
+            sys.executable,
+            "-u",
+            "run_dpo.py",
+            base_model_path,
+            args.base_family,
+            f"outputs/{dpo_base_model_tag}",
+            str(cai_dir / "outputs" / run_tag / "dpo_base_dataset" / "cai_dpo_dataset.jsonl"),
+            *training_flags,
+        ],
+        env,
+        launcher,
+    )
+
+    run_step(
+        "Eval DPO adapter from base model",
+        eval_dir,
+        [
+            sys.executable,
+            "-u",
+            "run_eval.py",
+            str(pt_dir / "outputs" / dpo_base_model_tag),
+            args.base_family,
+            str(args.eval_num_shots),
+            f"outputs/{dpo_base_model_tag}_eval",
+            *eval_flags,
+        ],
+        env,
+        launcher,
+    )
+
+    run_step(
+        "DPO response pairs from SFT adapter",
+        cai_dir,
+        [
+            sys.executable,
+            "-u",
+            "run_cai_response_pairs.py",
+            str(pt_dir / "outputs" / sft_model_tag),
+            args.base_family,
+            f"outputs/{run_tag}/dpo_sft_pairs",
+            str(dpo_source),
+            "--max-examples",
+            str(full_dpo_rows),
+            "--temperature",
+            str(args.pair_temperature),
+            "--top-p",
+            str(args.pair_top_p),
+            "--candidate-attempts",
+            str(args.pair_candidate_attempts),
+            *common_generation_flags,
+        ],
+        env,
+        launcher,
+    )
+
+    run_step(
+        "Judge DPO SFT pairs",
+        cai_dir,
+        [
+            sys.executable,
+            "-u",
+            "run_cai_preferences.py",
+            critic_model_path,
+            args.critic_family,
+            f"outputs/{run_tag}/dpo_sft_dataset",
+            str(dpo_source),
+            f"outputs/{run_tag}/dpo_sft_pairs/response_pairs.jsonl",
+            "--max-examples",
+            str(full_dpo_rows),
+            "--max-new-tokens",
+            str(args.judge_max_new_tokens),
+            *common_generation_flags,
+        ],
+        env,
+        launcher,
+    )
+    log(f"CAI DPO SFT dataset rows: {count_lines(cai_dir / 'outputs' / run_tag / 'dpo_sft_dataset' / 'cai_dpo_dataset.jsonl')}")
+
+    run_step(
+        "Train DPO adapter from SFT adapter",
+        pt_dir,
+        [
+            sys.executable,
+            "-u",
+            "run_dpo.py",
+            str(pt_dir / "outputs" / sft_model_tag),
+            args.base_family,
+            f"outputs/{dpo_sft_model_tag}",
+            str(cai_dir / "outputs" / run_tag / "dpo_sft_dataset" / "cai_dpo_dataset.jsonl"),
+            *training_flags,
+        ],
+        env,
+        launcher,
+    )
+
+    run_step(
+        "Eval DPO adapter from SFT adapter",
+        eval_dir,
+        [
+            sys.executable,
+            "-u",
+            "run_eval.py",
+            str(pt_dir / "outputs" / dpo_sft_model_tag),
+            args.base_family,
+            str(args.eval_num_shots),
+            f"outputs/{dpo_sft_model_tag}_eval",
+            *eval_flags,
+        ],
+        env,
+        launcher,
+    )
+
+    log("Pipeline finished successfully")
+    log(f"Cached base model: {base_model_path}")
+    log(f"Cached critic model: {critic_model_path}")
+    log(f"CAI outputs: {cai_dir / 'outputs' / run_tag}")
+    log(f"SFT adapter: {pt_dir / 'outputs' / sft_model_tag}")
+    log(f"DPO base adapter: {pt_dir / 'outputs' / dpo_base_model_tag}")
+    log(f"DPO from SFT adapter: {pt_dir / 'outputs' / dpo_sft_model_tag}")
+
+
+if __name__ == "__main__":
+    main()
