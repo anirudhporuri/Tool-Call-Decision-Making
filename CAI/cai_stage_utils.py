@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from cai_utils import count_label_values, format_conversation, load_jsonl, validate_balanced_counts
+from cai_utils import count_label_values, load_jsonl, source_prompt_messages, source_user_request_text, validate_balanced_counts
 
 
 SMOKE_LABEL_ORDER = ["tool_call", "request_for_info", "cannot_answer"]
@@ -68,10 +68,11 @@ def load_selected_source_rows(
     split_name = source_tag(source_file)
     for row_index, row in selected:
         annotated_row = dict(row)
+        annotated_row["messages"] = source_prompt_messages(annotated_row)
         annotated_row["source_row_index"] = row_index
         annotated_row["example_id"] = example_id_for_row(source_file, row_index)
         annotated_row["source_split"] = split_name
-        annotated_row["user_request"] = format_conversation(annotated_row["messages"])
+        annotated_row["user_request"] = source_user_request_text(annotated_row)
         annotated.append(annotated_row)
     return annotated
 

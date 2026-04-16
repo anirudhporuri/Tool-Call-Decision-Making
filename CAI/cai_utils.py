@@ -28,7 +28,7 @@ POST_TRAINING_DIR = REPO_ROOT / "Post-Training Baselines"
 if str(POST_TRAINING_DIR) not in sys.path:
     sys.path.insert(0, str(POST_TRAINING_DIR))
 
-from w2c_train_format import build_training_prompt  # noqa: E402
+from w2c_train_format import build_training_prompt, split_context_and_target  # noqa: E402
 
 
 DEFAULT_SELF_MODELS = {
@@ -142,6 +142,24 @@ def format_conversation(messages: List[Dict[str, Any]]) -> str:
         content = str(msg.get("content", "")).strip()
         lines.append(f"{role}: {content}")
     return "\n".join(lines)
+
+
+def source_prompt_messages(row: Dict[str, Any]) -> List[Dict[str, Any]]:
+    messages = row.get("messages", [])
+    if not isinstance(messages, list):
+        return []
+    copied_messages = [dict(message) for message in messages if isinstance(message, dict)]
+    if copied_messages and copied_messages[-1].get("role") == "assistant":
+        try:
+            context_messages, _ = split_context_and_target(copied_messages)
+            return [dict(message) for message in context_messages]
+        except Exception:
+            return copied_messages
+    return copied_messages
+
+
+def source_user_request_text(row: Dict[str, Any]) -> str:
+    return format_conversation(source_prompt_messages(row))
 
 
 def serialize_tools(tools: Any) -> str:
@@ -598,7 +616,7 @@ def build_policy_prompt(model_family: str, row: Dict[str, Any]) -> str:
     return build_training_prompt(
         model_family=model_family,
         tools=row["tools"],
-        context_messages=row["messages"],
+        context_messages=source_prompt_messages(row),
     )
 
 
