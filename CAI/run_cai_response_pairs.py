@@ -58,8 +58,14 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--start-index", type=int, default=0)
     parser.add_argument("--max-examples", type=int, default=env_int("MAX_EXAMPLES", None))
     parser.add_argument("--max-new-tokens", type=int, default=env_int("POLICY_MAX_NEW_TOKENS", 256))
-    parser.add_argument("--temperature", type=float, default=env_float("POLICY_TEMPERATURE", 0.8))
+    parser.add_argument("--temperature", type=float, default=env_float("POLICY_TEMPERATURE", 0.9))
     parser.add_argument("--top-p", type=float, default=env_float("POLICY_TOP_P", 0.95))
+    parser.add_argument(
+        "--candidate-attempts",
+        type=int,
+        default=env_int("PAIR_CANDIDATE_ATTEMPTS", 6),
+        help="Maximum number of sampled attempts per prompt while searching for two distinct canonical responses.",
+    )
     parser.add_argument("--dry-run", action="store_true", default=env_flag("DRY_RUN", False))
     parser.add_argument("--smoke-run", action="store_true", default=env_flag("SMOKE_RUN", False))
     parser.add_argument("--dry-run-max-examples", type=int, default=env_int("DRY_RUN_MAX_EXAMPLES", 8))
@@ -93,20 +99,63 @@ def summarize_records(records: List[Dict[str, Any]]) -> Dict[str, Any]:
     class_counts_a: Dict[str, int] = {}
     class_counts_b: Dict[str, int] = {}
     duplicate_rows = 0
+    resampled_rows = 0
+    max_sampling_attempts = 0
     for record in records:
         class_counts_a[record["response_a_class"]] = class_counts_a.get(record["response_a_class"], 0) + 1
         class_counts_b[record["response_b_class"]] = class_counts_b.get(record["response_b_class"], 0) + 1
         if record["response_a"] == record["response_b"]:
             duplicate_rows += 1
+        if record.get("sampling_attempts", 0) > 2:
+            resampled_rows += 1
+        max_sampling_attempts = max(max_sampling_attempts, int(record.get("sampling_attempts", 0)))
     return {
         "response_a_class_counts": class_counts_a,
         "response_b_class_counts": class_counts_b,
         "duplicate_rows": duplicate_rows,
+        "resampled_rows": resampled_rows,
+        "max_sampling_attempts": max_sampling_attempts,
+    }
+
+
+def sample_candidate(
+    *,
+    model: Any,
+    tokenizer: Any,
+    prompt: str,
+    model_family: str,
+    max_new_tokens: int,
+    temperature: float,
+    top_p: float,
+    seed: int,
+    tools: Any,
+) -> Dict[str, Any]:
+    response_raw = generate_response(
+        model=model,
+        tokenizer=tokenizer,
+        prompt=prompt,
+        model_family=model_family,
+        max_new_tokens=max_new_tokens,
+        do_sample=True,
+        temperature=temperature,
+        top_p=top_p,
+        seed=seed,
+    )
+    evaluation = evaluate_candidate_response(response_raw, tools)
+    return {
+        "raw": response_raw,
+        "canonical": evaluation["canonical"],
+        "class": evaluation["class"],
+        "valid": evaluation["valid"],
+        "validation_reason": evaluation["reason"],
+        "structural_kind": evaluation["structural_kind"],
     }
 
 
 def main(argv: Optional[Sequence[str]] = None) -> None:
     args = parse_args(argv)
+    if args.candidate_attempts < 2:
+        raise ValueError("--candidate-attempts must be at least 2.")
     out_dir = ensure_dir(args.output_dir)
     save_json(out_dir / "run_config.json", sanitized_args_dict(args))
 
@@ -166,30 +215,32 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     )
     for idx, row in iterator:
         policy_prompt = build_policy_prompt(args.policy_family, row)
-        response_a_raw = generate_response(
-            model=model,
-            tokenizer=tokenizer,
-            prompt=policy_prompt,
-            model_family=args.policy_family,
-            max_new_tokens=args.max_new_tokens,
-            do_sample=True,
-            temperature=args.temperature,
-            top_p=args.top_p,
-            seed=args.seed + (idx * 2),
-        )
-        response_b_raw = generate_response(
-            model=model,
-            tokenizer=tokenizer,
-            prompt=policy_prompt,
-            model_family=args.policy_family,
-            max_new_tokens=args.max_new_tokens,
-            do_sample=True,
-            temperature=args.temperature,
-            top_p=args.top_p,
-            seed=args.seed + (idx * 2) + 1,
-        )
-        eval_a = evaluate_candidate_response(response_a_raw, row["tools"])
-        eval_b = evaluate_candidate_response(response_b_raw, row["tools"])
+        sampled_candidates: List[Dict[str, Any]] = []
+        distinct_candidates: List[Dict[str, Any]] = []
+        seen_canonicals = set()
+        seed_base = args.seed + (idx * args.candidate_attempts)
+        for attempt_idx in range(args.candidate_attempts):
+            candidate = sample_candidate(
+                model=model,
+                tokenizer=tokenizer,
+                prompt=policy_prompt,
+                model_family=args.policy_family,
+                max_new_tokens=args.max_new_tokens,
+                temperature=args.temperature,
+                top_p=args.top_p,
+                seed=seed_base + attempt_idx,
+                tools=row["tools"],
+            )
+            sampled_candidates.append(candidate)
+            canonical_key = candidate["canonical"]
+            if canonical_key not in seen_canonicals:
+                seen_canonicals.add(canonical_key)
+                distinct_candidates.append(candidate)
+            if len(distinct_candidates) >= 2:
+                break
+
+        response_a = distinct_candidates[0] if distinct_candidates else sampled_candidates[0]
+        response_b = distinct_candidates[1] if len(distinct_candidates) >= 2 else sampled_candidates[-1]
         records.append(
             {
                 "example_id": row["example_id"],
@@ -199,18 +250,20 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
                 "tools": row["tools"],
                 "messages": row["messages"],
                 "user_request": row["user_request"],
-                "response_a_raw": response_a_raw,
-                "response_a": eval_a["canonical"],
-                "response_a_class": eval_a["class"],
-                "response_a_valid": eval_a["valid"],
-                "response_a_validation_reason": eval_a["reason"],
-                "response_a_structural_kind": eval_a["structural_kind"],
-                "response_b_raw": response_b_raw,
-                "response_b": eval_b["canonical"],
-                "response_b_class": eval_b["class"],
-                "response_b_valid": eval_b["valid"],
-                "response_b_validation_reason": eval_b["reason"],
-                "response_b_structural_kind": eval_b["structural_kind"],
+                "sampling_attempts": len(sampled_candidates),
+                "distinct_candidates_found": len(distinct_candidates),
+                "response_a_raw": response_a["raw"],
+                "response_a": response_a["canonical"],
+                "response_a_class": response_a["class"],
+                "response_a_valid": response_a["valid"],
+                "response_a_validation_reason": response_a["validation_reason"],
+                "response_a_structural_kind": response_a["structural_kind"],
+                "response_b_raw": response_b["raw"],
+                "response_b": response_b["canonical"],
+                "response_b_class": response_b["class"],
+                "response_b_valid": response_b["valid"],
+                "response_b_validation_reason": response_b["validation_reason"],
+                "response_b_structural_kind": response_b["structural_kind"],
             }
         )
 

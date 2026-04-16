@@ -11,7 +11,7 @@ from cai_stage_utils import (
     should_enforce_strict_balance,
     source_balance,
 )
-from cai_utils import count_label_values, ensure_dir, load_jsonl, save_json, validate_balanced_counts, write_jsonl
+from cai_utils import count_label_values, ensure_dir, load_jsonl, save_json, write_jsonl
 
 
 def env_flag(name: str, default: bool) -> bool:
@@ -59,38 +59,33 @@ def resolve_max_examples(args: argparse.Namespace) -> Optional[int]:
 
 
 def summarize_records(records: List[Dict[str, Any]]) -> Dict[str, Any]:
-    valid_counts: Dict[str, int] = {}
-    heuristic_counts: Dict[str, int] = {}
-    failure_counts: Dict[str, int] = {}
-    preserved_original_rows = 0
-    selected_revision_rows = 0
+    exported_counts: Dict[str, int] = {}
+    empty_revised_rows = 0
+    revised_structural_kind_counts: Dict[str, int] = {}
+    revised_valid_counts: Dict[str, int] = {}
     for record in records:
         label = record["chosen_behavior_class"]
-        if record["selected_response_valid"]:
-            valid_counts[label] = valid_counts.get(label, 0) + 1
-        response_class = record.get("selected_response_class")
-        if response_class:
-            heuristic_counts[response_class] = heuristic_counts.get(response_class, 0) + 1
-        reason = record.get("selection_failure_reason")
-        if reason:
-            failure_counts[reason] = failure_counts.get(reason, 0) + 1
-        if record["selected_source"] == "original":
-            preserved_original_rows += 1
-        elif record["selected_source"] == "revision":
-            selected_revision_rows += 1
+        revised_kind = record.get("revised_output_structural_kind")
+        if revised_kind:
+            revised_structural_kind_counts[revised_kind] = revised_structural_kind_counts.get(revised_kind, 0) + 1
+        revised_valid_key = "valid" if record.get("revised_output_valid") else "invalid"
+        revised_valid_counts[revised_valid_key] = revised_valid_counts.get(revised_valid_key, 0) + 1
+        if record.get("selected_response"):
+            exported_counts[label] = exported_counts.get(label, 0) + 1
+        else:
+            empty_revised_rows += 1
     return {
-        "valid_counts": valid_counts,
-        "heuristic_counts": heuristic_counts,
-        "failure_counts": failure_counts,
-        "preserved_original_rows": preserved_original_rows,
-        "selected_revision_rows": selected_revision_rows,
+        "exported_counts": exported_counts,
+        "empty_revised_rows": empty_revised_rows,
+        "revised_structural_kind_counts": revised_structural_kind_counts,
+        "revised_valid_counts": revised_valid_counts,
     }
 
 
 def export_rows(records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     rows: List[Dict[str, Any]] = []
     for record in records:
-        if not record["selected_response_valid"]:
+        if not record["selected_response"]:
             continue
         rows.append(
             {
@@ -140,33 +135,11 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
 
     master_records: List[Dict[str, Any]] = []
     for source_row, initial_row, critique_row, revision_row in zip(source_rows, initial_rows, critique_rows, revision_rows):
-        original_score = 2 if initial_row["initial_output_structural_kind"] == "valid_tool_call" else (1 if initial_row["initial_output_structural_kind"] == "plain_text" else 0)
-        revision_score = 2 if revision_row["revised_output_structural_kind"] == "valid_tool_call" else (1 if revision_row["revised_output_structural_kind"] == "plain_text" else 0)
-
-        if original_score > revision_score:
-            selected_source = "original"
-            selection_reason = f"preserved_original:{revision_row['revised_output_structural_kind']}:{revision_row['revised_output_validation_reason']}"
-            selected_response = initial_row["initial_output"]
-            selected_class = initial_row["initial_output_class"]
-            selected_valid = initial_row["initial_output_valid"]
-        elif revision_score > original_score:
-            selected_source = "revision"
-            selection_reason = "used_revision" if revision_row["revised_output_valid"] else f"invalid_revision:{revision_row['revised_output_validation_reason']}"
-            selected_response = revision_row["revised_output"]
-            selected_class = revision_row["revised_output_class"]
-            selected_valid = revision_row["revised_output_valid"]
-        else:
-            selected_source = "original"
-            selection_reason = f"preserved_original:tie:{initial_row['initial_output_structural_kind']}"
-            selected_response = initial_row["initial_output"]
-            selected_class = initial_row["initial_output_class"]
-            selected_valid = initial_row["initial_output_valid"]
-
-        selection_failure_reason = None
-        if not selected_response:
-            selection_failure_reason = "empty_selected_response"
-        elif not selected_valid:
-            selection_failure_reason = selection_reason
+        selected_source = "revision"
+        selection_reason = "used_revision_directly"
+        selected_response = revision_row["revised_output"]
+        selected_valid = revision_row["revised_output_valid"]
+        selection_failure_reason = None if selected_response else "empty_revised_output"
 
         master_records.append(
             {
@@ -202,7 +175,6 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
                 "selected_source": selected_source,
                 "selection_reason": selection_reason,
                 "selected_response": selected_response,
-                "selected_response_class": selected_class,
                 "selected_response_valid": selected_valid,
                 "selection_failure_reason": selection_failure_reason,
             }
@@ -232,16 +204,13 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         },
     )
 
-    export_counts = (
-        validate_balanced_counts(export_dataset, "behavior_class")
-        if strict_balance and export_dataset
-        else count_label_values(export_dataset, "behavior_class") if export_dataset else {}
+    save_json(
+        out_dir / "export_counts.json",
+        {
+            "source_balance": selected_balance,
+            "export_balance": count_label_values(export_dataset, "behavior_class") if export_dataset else {},
+        },
     )
-    if strict_balance and export_counts != selected_balance:
-        raise RuntimeError(
-            f"Generated CAI SFT dataset is not fully balanced/valid. "
-            f"source={selected_balance}, export={export_counts}"
-        )
 
 
 if __name__ == "__main__":

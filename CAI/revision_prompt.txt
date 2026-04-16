@@ -20,7 +20,7 @@ Rewrite the response so it follows the constitution.
 If the critique is invalid, contradictory, or does not make sense given the user request, available tools, and original response, ignore the critique and preserve the original response.
 If the original response already follows the constitution better than the critique suggests, reproduce the original response exactly.
 Never change a correct response into a worse or malformed one.
-If no tools are available, do not output a tool call; rewrite the response as a short cannot-answer response.
+If no tools are available, do not output a tool call; rewrite the response explaining why you cannot answer.
 
 If the correct output is a tool call, use exactly:
 <TOOLCALL>{"name":"tool_name","arguments":{...}}</TOOLCALL>
