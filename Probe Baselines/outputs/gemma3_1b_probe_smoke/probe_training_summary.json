@@ -1,0 +1,50 @@
+{
+  "label_names": [
+    "tool_call",
+    "request_for_info",
+    "cannot_answer"
+  ],
+  "num_train_examples": 12,
+  "hidden_size": 1152,
+  "dev_size": 0.2,
+  "random_seed": 42,
+  "c_values_tried": [
+    0.01,
+    0.1,
+    1.0,
+    10.0,
+    100.0
+  ],
+  "dev_results": [
+    {
+      "C": 0.01,
+      "dev_accuracy": 0.3333333333333333,
+      "dev_macro_f1": 0.3333333333333333
+    },
+    {
+      "C": 0.1,
+      "dev_accuracy": 0.6666666666666666,
+      "dev_macro_f1": 0.5555555555555555
+    },
+    {
+      "C": 1.0,
+      "dev_accuracy": 0.6666666666666666,
+      "dev_macro_f1": 0.5555555555555555
+    },
+    {
+      "C": 10.0,
+      "dev_accuracy": 0.6666666666666666,
+      "dev_macro_f1": 0.5555555555555555
+    },
+    {
+      "C": 100.0,
+      "dev_accuracy": 0.6666666666666666,
+      "dev_macro_f1": 0.5555555555555555
+    }
+  ],
+  "best_hparams": {
+    "C": 0.1,
+    "dev_accuracy": 0.6666666666666666,
+    "dev_macro_f1": 0.5555555555555555
+  }
+}

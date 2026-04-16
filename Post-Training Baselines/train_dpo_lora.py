@@ -161,6 +161,10 @@ def build_quant_config(args: argparse.Namespace) -> Optional[BitsAndBytesConfig]
     )
 
 
+def is_peft_adapter_checkpoint(path: str | Path) -> bool:
+    return (Path(path) / "adapter_config.json").is_file()
+
+
 def save_preview(dataset, path: Path, n: int = 20) -> None:
     with open(path, "w", encoding="utf-8") as f:
         for i in range(min(n, len(dataset))):
@@ -280,11 +284,19 @@ def main(argv: Optional[List[str]] = None) -> None:
         print(json.dumps(summary, indent=2))
         return
 
-    from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
+    from peft import LoraConfig, PeftConfig, PeftModel, get_peft_model, prepare_model_for_kbit_training
     from trl import DPOConfig, DPOTrainer
 
+    model_source = args.model_name_or_path
+    adapter_start = is_peft_adapter_checkpoint(model_source)
+    base_model_name_or_path = model_source
+    if adapter_start:
+        peft_config = PeftConfig.from_pretrained(model_source, token=args.hf_token)
+        base_model_name_or_path = peft_config.base_model_name_or_path
+
+    tokenizer_source = model_source if Path(model_source).exists() else base_model_name_or_path
     tokenizer = AutoTokenizer.from_pretrained(
-        args.model_name_or_path,
+        tokenizer_source,
         token=args.hf_token,
         trust_remote_code=args.trust_remote_code,
     )
@@ -294,7 +306,7 @@ def main(argv: Optional[List[str]] = None) -> None:
         patch_gemma_tokenizer_for_training(tokenizer)
 
     model = AutoModelForCausalLM.from_pretrained(
-        args.model_name_or_path,
+        base_model_name_or_path,
         token=args.hf_token,
         torch_dtype=get_dtype(args.dtype),
         quantization_config=build_quant_config(args),
@@ -310,16 +322,27 @@ def main(argv: Optional[List[str]] = None) -> None:
         model.gradient_checkpointing_enable()
         model.config.use_cache = False
 
-    peft_config = LoraConfig(
-        r=args.lora_r,
-        lora_alpha=args.lora_alpha,
-        lora_dropout=args.lora_dropout,
-        bias="none",
-        task_type="CAUSAL_LM",
-        target_modules=[m.strip() for m in args.target_modules.split(",") if m.strip()],
-    )
-    model = get_peft_model(model, peft_config)
+    if adapter_start:
+        model = PeftModel.from_pretrained(
+            model,
+            model_source,
+            token=args.hf_token,
+            is_trainable=True,
+        )
+    else:
+        peft_config = LoraConfig(
+            r=args.lora_r,
+            lora_alpha=args.lora_alpha,
+            lora_dropout=args.lora_dropout,
+            bias="none",
+            task_type="CAUSAL_LM",
+            target_modules=[m.strip() for m in args.target_modules.split(",") if m.strip()],
+        )
+        model = get_peft_model(model, peft_config)
     model.print_trainable_parameters()
+
+    if args.gradient_checkpointing:
+        model.config.use_cache = False
 
     trainer_config_kwargs = {
         "output_dir": str(out_dir),
@@ -366,7 +389,15 @@ def main(argv: Optional[List[str]] = None) -> None:
     trainer.save_model()
     tokenizer.save_pretrained(out_dir)
 
-    save_json(out_dir / "train_metrics.json", train_result.metrics)
+    save_json(
+        out_dir / "train_metrics.json",
+        {
+            **train_result.metrics,
+            "adapter_start": adapter_start,
+            "base_model_name_or_path": base_model_name_or_path,
+            "model_source": model_source,
+        },
+    )
 
     if eval_ds is not None:
         eval_metrics = trainer.evaluate()
