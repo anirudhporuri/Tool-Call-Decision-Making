@@ -17,22 +17,14 @@
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="/fs/classhomes/mukunds/Tool-Call-Decision-Making"
 VENV_DIR="${REPO_ROOT}/.venv"
-SOURCE_JSONL="${REPO_ROOT}/Data_Management/generated_datasets/when2call_balanced_sft.jsonl"
-MODEL_CACHE_DIR="${REPO_ROOT}/cluster_cache/model_cache"
-HF_HOME_DIR="${REPO_ROOT}/cluster_cache/hf_home"
 
 echo "Activating virtualenv at ${VENV_DIR}"
 # shellcheck disable=SC1091
 source "${VENV_DIR}/bin/activate"
 
-python3 -u "${SCRIPT_DIR}/cai_full_pipeline_common.py" \
-  --repo-root "${REPO_ROOT}" \
-  --source-jsonl "${SOURCE_JSONL}" \
-  --model-cache-dir "${MODEL_CACHE_DIR}" \
-  --hf-home-dir "${HF_HOME_DIR}" \
+python3 -u "${REPO_ROOT}/CAI/cai_full_pipeline_common.py" \
   --base-model "google/gemma-3-4b-it" \
   --base-family "gemma" \
   --base-tag "gemma" \

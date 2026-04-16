@@ -18,9 +18,13 @@ except ImportError:  # pragma: no cover - surfaced at runtime on cluster.
 
 
 SCRIPT_PATH = Path(__file__).resolve()
-DEFAULT_REPO_ROOT = Path("/fs/classhomes/mukunds/Tool-Call-Decision-Making")
-DEFAULT_SOURCE_JSONL = DEFAULT_REPO_ROOT / "Data_Management" / "generated_datasets" / "when2call_balanced_sft.jsonl"
-DEFAULT_CACHE_ROOT = DEFAULT_REPO_ROOT / "cluster_cache"
+REPO_ROOT = Path("/fs/classhomes/mukunds/Tool-Call-Decision-Making")
+CAI_DIR = REPO_ROOT / "CAI"
+PT_DIR = REPO_ROOT / "Post-Training Baselines"
+EVAL_DIR = REPO_ROOT / "Prompting Baselines"
+SOURCE_JSONL = REPO_ROOT / "Data_Management" / "generated_datasets" / "when2call_balanced_sft.jsonl"
+MODEL_CACHE_DIR = REPO_ROOT / "cluster_cache" / "model_cache"
+HF_HOME_DIR = REPO_ROOT / "cluster_cache" / "hf_home"
 
 
 def timestamp() -> str:
@@ -118,10 +122,6 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         description="Run the full CAI -> SFT -> Eval -> DPO pipeline on the cluster.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    parser.add_argument("--repo-root", default=os.getenv("W2C_REPO_ROOT", str(DEFAULT_REPO_ROOT)))
-    parser.add_argument("--source-jsonl", default=os.getenv("CAI_SOURCE_JSONL", str(DEFAULT_SOURCE_JSONL)))
-    parser.add_argument("--model-cache-dir", default=os.getenv("MODEL_CACHE_DIR", str(DEFAULT_CACHE_ROOT / "model_cache")))
-    parser.add_argument("--hf-home-dir", default=os.getenv("HF_HOME_DIR", str(DEFAULT_CACHE_ROOT / "hf_home")))
     parser.add_argument("--base-model", required=True)
     parser.add_argument("--base-family", required=True, choices=["llama", "gemma"])
     parser.add_argument("--base-tag", required=True)
@@ -151,13 +151,13 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
 def main(argv: Optional[Sequence[str]] = None) -> None:
     args = parse_args(argv)
 
-    repo_root = Path(args.repo_root).expanduser().resolve()
-    cai_dir = repo_root / "CAI"
-    pt_dir = repo_root / "Post-Training Baselines"
-    eval_dir = repo_root / "Prompting Baselines"
-    source_jsonl = Path(args.source_jsonl).expanduser().resolve()
-    model_cache_dir = ensure_dir(Path(args.model_cache_dir).expanduser().resolve())
-    hf_home_dir = ensure_dir(Path(args.hf_home_dir).expanduser().resolve())
+    repo_root = REPO_ROOT
+    cai_dir = CAI_DIR
+    pt_dir = PT_DIR
+    eval_dir = EVAL_DIR
+    source_jsonl = SOURCE_JSONL
+    model_cache_dir = ensure_dir(MODEL_CACHE_DIR)
+    hf_home_dir = ensure_dir(HF_HOME_DIR)
 
     run_tag = args.run_tag or f"{args.base_tag}_{args.critic_tag}_full"
     sft_model_tag = args.sft_model_tag or f"{run_tag}_sft_model"
