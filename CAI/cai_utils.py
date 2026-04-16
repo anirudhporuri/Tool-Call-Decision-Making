@@ -481,13 +481,38 @@ def load_generation_model(
     if quant_config is not None:
         model_kwargs["quantization_config"] = quant_config
 
+    def load_causal_lm(target_model_name_or_path: str, kwargs: Dict[str, Any]) -> Any:
+        try:
+            return AutoModelForCausalLM.from_pretrained(
+                target_model_name_or_path,
+                **kwargs,
+            )
+        except ValueError as exc:
+            message = str(exc)
+            if (
+                "The model is quantized with" in message
+                and "BitsAndBytesConfig" in message
+                and "quantization_config" in kwargs
+            ):
+                retry_kwargs = dict(kwargs)
+                retry_kwargs.pop("quantization_config", None)
+                print(
+                    "Model already defines a native quantization config; "
+                    "retrying load without BitsAndBytes override."
+                )
+                return AutoModelForCausalLM.from_pretrained(
+                    target_model_name_or_path,
+                    **retry_kwargs,
+                )
+            raise
+
     if is_peft_adapter_checkpoint(model_name_or_path):
         from peft import PeftConfig, PeftModel
 
         peft_config = PeftConfig.from_pretrained(model_name_or_path, token=hf_token)
-        base_model = AutoModelForCausalLM.from_pretrained(
+        base_model = load_causal_lm(
             peft_config.base_model_name_or_path,
-            **model_kwargs,
+            model_kwargs,
         )
         model = PeftModel.from_pretrained(
             base_model,
@@ -495,9 +520,9 @@ def load_generation_model(
             token=hf_token,
         )
     else:
-        model = AutoModelForCausalLM.from_pretrained(
+        model = load_causal_lm(
             model_name_or_path,
-            **model_kwargs,
+            model_kwargs,
         )
 
     model.eval()
