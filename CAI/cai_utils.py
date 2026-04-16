@@ -620,21 +620,28 @@ def _wrap_qwen_chat(user_text: str) -> str:
     return f"<|im_start|>user\n{user_text}<|im_end|>\n<|im_start|>assistant\n"
 
 
-def _wrap_with_tokenizer_chat_template(tokenizer: Any, user_text: str) -> Optional[str]:
+def _wrap_with_tokenizer_chat_template(tokenizer: Any, user_text: str, model_family: str) -> Optional[str]:
     if tokenizer is None or not hasattr(tokenizer, "apply_chat_template"):
         return None
+    template_kwargs: Dict[str, Any] = {
+        "tokenize": False,
+        "add_generation_prompt": True,
+    }
+    # Qwen3.5 docs specify disabling thinking for direct-response mode via
+    # tokenizer.apply_chat_template(..., enable_thinking=False).
+    if model_family == "qwen":
+        template_kwargs["enable_thinking"] = False
     try:
         return tokenizer.apply_chat_template(
             [{"role": "user", "content": user_text}],
-            tokenize=False,
-            add_generation_prompt=True,
+            **template_kwargs,
         )
     except Exception:
         return None
 
 
 def wrap_chat_prompt(model_family: str, user_text: str, tokenizer: Any = None) -> str:
-    template_wrapped = _wrap_with_tokenizer_chat_template(tokenizer, user_text)
+    template_wrapped = _wrap_with_tokenizer_chat_template(tokenizer, user_text, model_family)
     if template_wrapped is not None and model_family in {"qwen", "gpt-oss", "phi", "mistral"}:
         return template_wrapped
     if model_family == "llama":
