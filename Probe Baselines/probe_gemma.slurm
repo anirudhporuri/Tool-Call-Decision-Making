@@ -7,7 +7,7 @@
 #SBATCH --qos=default
 #SBATCH --time=12:00:00
 #SBATCH --mem=32g
-#SBATCH --gres=gpu:1
+#SBATCH --gres=gpu:rtxa5000:1
 
 # Submit from the Probe Baselines directory or with an absolute path, for example:
 #   sbatch probe_class.slurm
