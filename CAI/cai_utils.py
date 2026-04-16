@@ -9,8 +9,17 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
-import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+try:
+    import torch
+except ImportError:  # pragma: no cover - handled at runtime when generation is invoked
+    torch = None  # type: ignore[assignment]
+
+try:
+    from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+except ImportError:  # pragma: no cover - handled at runtime when generation is invoked
+    AutoModelForCausalLM = None  # type: ignore[assignment]
+    AutoTokenizer = None  # type: ignore[assignment]
+    BitsAndBytesConfig = None  # type: ignore[assignment]
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -415,6 +424,8 @@ def count_label_values(rows: List[Dict[str, Any]], label_key: str) -> Dict[str, 
 
 
 def get_dtype(name: str) -> torch.dtype:
+    if torch is None:
+        raise ImportError("torch is required for model generation utilities.")
     return {
         "float16": torch.float16,
         "bfloat16": torch.bfloat16,
@@ -423,6 +434,8 @@ def get_dtype(name: str) -> torch.dtype:
 
 
 def build_quant_config(load_in_4bit: bool, dtype_name: str) -> Optional[BitsAndBytesConfig]:
+    if BitsAndBytesConfig is None and load_in_4bit:
+        raise ImportError("transformers with bitsandbytes support is required for 4-bit loading.")
     if not load_in_4bit:
         return None
     return BitsAndBytesConfig(
@@ -446,6 +459,8 @@ def load_generation_model(
     load_in_4bit: bool,
     trust_remote_code: bool,
 ) -> Tuple[Any, Any]:
+    if AutoTokenizer is None or AutoModelForCausalLM is None:
+        raise ImportError("transformers is required for model generation utilities.")
     tokenizer = AutoTokenizer.from_pretrained(
         model_name_or_path,
         token=hf_token,
@@ -576,11 +591,35 @@ def _wrap_gemma_chat(user_text: str) -> str:
     return f"<start_of_turn>user\n{user_text}<end_of_turn>\n<start_of_turn>model\n"
 
 
-def wrap_chat_prompt(model_family: str, user_text: str) -> str:
+def _wrap_qwen_chat(user_text: str) -> str:
+    return f"<|im_start|>user\n{user_text}<|im_end|>\n<|im_start|>assistant\n"
+
+
+def _wrap_with_tokenizer_chat_template(tokenizer: Any, user_text: str) -> Optional[str]:
+    if tokenizer is None or not hasattr(tokenizer, "apply_chat_template"):
+        return None
+    try:
+        return tokenizer.apply_chat_template(
+            [{"role": "user", "content": user_text}],
+            tokenize=False,
+            add_generation_prompt=True,
+        )
+    except Exception:
+        return None
+
+
+def wrap_chat_prompt(model_family: str, user_text: str, tokenizer: Any = None) -> str:
+    template_wrapped = _wrap_with_tokenizer_chat_template(tokenizer, user_text)
+    if template_wrapped is not None and model_family in {"qwen", "gpt-oss", "phi", "mistral"}:
+        return template_wrapped
     if model_family == "llama":
         return _wrap_llama_chat(user_text)
     if model_family == "gemma":
         return _wrap_gemma_chat(user_text)
+    if model_family == "qwen":
+        return _wrap_qwen_chat(user_text)
+    if model_family in {"gpt-oss", "phi", "mistral"}:
+        return user_text
     raise ValueError(f"Unsupported model_family={model_family!r}")
 
 
@@ -591,6 +630,7 @@ def build_critique_prompt(
     user_request: str,
     tools: Any,
     assistant_response: str,
+    tokenizer: Any = None,
 ) -> str:
     template = load_template("critique_prompt.txt")
     prompt = render_template(
@@ -600,7 +640,7 @@ def build_critique_prompt(
         TOOLS=serialize_tools(tools),
         ASSISTANT_RESPONSE=assistant_response.strip(),
     )
-    return wrap_chat_prompt(model_family, prompt)
+    return wrap_chat_prompt(model_family, prompt, tokenizer=tokenizer)
 
 
 def build_revision_prompt(
@@ -611,6 +651,7 @@ def build_revision_prompt(
     tools: Any,
     assistant_response: str,
     critique_text: str,
+    tokenizer: Any = None,
 ) -> str:
     template = load_template("revision_prompt.txt")
     prompt = render_template(
@@ -621,7 +662,7 @@ def build_revision_prompt(
         ASSISTANT_RESPONSE=assistant_response.strip(),
         CRITIQUE=critique_text.strip(),
     )
-    return wrap_chat_prompt(model_family, prompt)
+    return wrap_chat_prompt(model_family, prompt, tokenizer=tokenizer)
 
 
 def build_preference_prompt(
@@ -632,6 +673,7 @@ def build_preference_prompt(
     tools: Any,
     response_a: str,
     response_b: str,
+    tokenizer: Any = None,
 ) -> str:
     template = load_template("preference_prompt.txt")
     prompt = render_template(
@@ -642,7 +684,7 @@ def build_preference_prompt(
         RESPONSE_A=response_a.strip(),
         RESPONSE_B=response_b.strip(),
     )
-    return wrap_chat_prompt(model_family, prompt)
+    return wrap_chat_prompt(model_family, prompt, tokenizer=tokenizer)
 
 
 def parse_critique_output(text: str) -> Dict[str, Any]:
@@ -677,6 +719,88 @@ def parse_preference_output(text: str) -> Dict[str, Any]:
         "winner": winner,
         "reason": reason,
         "raw_text": text.strip(),
+    }
+
+
+def critique_missing_fields(parsed: Dict[str, Any]) -> List[str]:
+    missing: List[str] = []
+    if parsed.get("verdict") not in {"NO_ISSUES", "ISSUES"}:
+        missing.append("Verdict")
+    if parsed.get("primary_issue") is None:
+        missing.append("Primary Issue")
+    elif parsed.get("verdict") == "NO_ISSUES" and parsed.get("primary_issue") != "none":
+        missing.append("Primary Issue")
+    elif parsed.get("verdict") == "ISSUES" and not parsed.get("valid"):
+        missing.append("Primary Issue")
+    if not parsed.get("critique"):
+        missing.append("Critique")
+    return missing
+
+
+def build_fallback_critique_text(raw_attempts: List[str], parsed_attempts: List[Dict[str, Any]]) -> str:
+    non_empty_attempts = [text.strip() for text in raw_attempts if text and text.strip()]
+    if not non_empty_attempts:
+        return (
+            "Critique parsing failed after two attempts.\n"
+            "Missing or invalid fields: Verdict, Primary Issue, Critique.\n"
+            "Use the constitution to rewrite the response correctly."
+        )
+
+    missing_fields = sorted(
+        {
+            field
+            for parsed in parsed_attempts
+            if not parsed.get("valid")
+            for field in critique_missing_fields(parsed)
+        }
+    )
+    fields_text = ", ".join(missing_fields) if missing_fields else "unknown"
+    lines = [
+        "Critique parsing failed after two attempts.",
+        f"Missing or invalid fields: {fields_text}.",
+        "Use the constitution and any useful critique content below to rewrite the response correctly.",
+    ]
+    for attempt_idx, text in enumerate(non_empty_attempts, start=1):
+        lines.append(f"Attempt {attempt_idx} raw critique:")
+        lines.append(text)
+    return "\n".join(lines)
+
+
+def evaluate_candidate_response(response_text: str, tools: Any) -> Dict[str, Any]:
+    canonical = canonicalize_assistant_response(response_text)
+    response_class = heuristic_class(canonical)
+    tool_call_like = has_tool_call_marker(response_text) or has_tool_call_marker(canonical)
+    tool_validation = validate_single_tool_call(canonical, tools)
+
+    if not canonical:
+        valid = False
+        reason = "empty_response"
+        score = 0
+        structural_kind = "empty"
+    elif tool_validation["valid"]:
+        valid = True
+        reason = None
+        score = 2
+        structural_kind = "valid_tool_call"
+    elif tool_call_like:
+        valid = False
+        reason = tool_validation["reason"]
+        score = 0
+        structural_kind = "invalid_tool_call"
+    else:
+        valid = True
+        reason = None
+        score = 1
+        structural_kind = "plain_text"
+
+    return {
+        "canonical": canonical,
+        "class": response_class,
+        "valid": valid,
+        "reason": reason,
+        "score": score,
+        "structural_kind": structural_kind,
+        "tool_validation": tool_validation,
     }
 
 
