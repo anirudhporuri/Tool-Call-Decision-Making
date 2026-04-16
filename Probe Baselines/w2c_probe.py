@@ -435,10 +435,57 @@ def load_tokenizer_and_model(args: argparse.Namespace):
     return tokenizer, model
 
 
+def infer_num_hidden_layers_from_config(config: Any) -> int:
+    if config is None:
+        return 0
+
+    direct_value = getattr(config, "num_hidden_layers", None)
+    if isinstance(direct_value, int) and direct_value > 0:
+        return direct_value
+
+    get_text_config = getattr(config, "get_text_config", None)
+    if callable(get_text_config):
+        try:
+            text_config = get_text_config()
+        except TypeError:
+            text_config = None
+        nested_value = infer_num_hidden_layers_from_config(text_config)
+        if nested_value > 0:
+            return nested_value
+
+    for attr_name in ("text_config", "language_config", "llm_config", "decoder", "base_model"):
+        nested = getattr(config, attr_name, None)
+        nested_value = infer_num_hidden_layers_from_config(nested)
+        if nested_value > 0:
+            return nested_value
+
+    if isinstance(config, dict):
+        direct_value = config.get("num_hidden_layers")
+        if isinstance(direct_value, int) and direct_value > 0:
+            return direct_value
+        for key in ("text_config", "language_config", "llm_config", "decoder", "base_model"):
+            nested_value = infer_num_hidden_layers_from_config(config.get(key))
+            if nested_value > 0:
+                return nested_value
+
+    return 0
+
+
 def resolve_layer_specs(model: AutoModelForCausalLM) -> List[LayerSpec]:
-    num_hidden_layers = int(getattr(model.config, "num_hidden_layers", 0))
+    num_hidden_layers = infer_num_hidden_layers_from_config(getattr(model, "config", None))
     if num_hidden_layers <= 0:
-        raise ValueError("Could not determine num_hidden_layers from model config for probe extraction.")
+        if hasattr(model, "get_base_model"):
+            try:
+                base_model = model.get_base_model()
+            except Exception:
+                base_model = None
+            if base_model is not None:
+                num_hidden_layers = infer_num_hidden_layers_from_config(getattr(base_model, "config", None))
+        if num_hidden_layers <= 0:
+            raise ValueError(
+                "Could not determine num_hidden_layers from model config for probe extraction. "
+                "Expected either config.num_hidden_layers or a nested text_config.num_hidden_layers."
+            )
 
     requested_layers = [
         ("middle", max(1, math.ceil(num_hidden_layers * 0.50))),
