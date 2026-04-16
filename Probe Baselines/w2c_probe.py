@@ -3,11 +3,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import pickle
 import random
+import subprocess
 import sys
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 
@@ -39,6 +41,11 @@ from w2c_prompts import build_prompt  # noqa: E402
 DEFAULT_DATASET_DIR = REPO_ROOT / "local_datasets"
 DEFAULT_MODEL_CACHE_DIR = REPO_ROOT / "cluster_cache" / "model_cache"
 DEFAULT_HF_HOME_DIR = REPO_ROOT / "cluster_cache" / "hf_home"
+DEFAULT_BALANCED_SOURCE_JSONL = (
+    REPO_ROOT / "Data_Management" / "generated_datasets" / "when2call_balanced_sft.jsonl"
+)
+CAI_DIR = REPO_ROOT / "CAI"
+CAI_SPLIT_SCRIPT = CAI_DIR / "run_cai_split.py"
 DEFAULT_TRAIN_SOURCE_JSONLS = [
     REPO_ROOT / "CAI" / "generated_datasets" / "train_pref_cai_sft_source.jsonl",
     REPO_ROOT / "CAI" / "generated_datasets" / "train_pref_cai_dpo_source.jsonl",
@@ -64,6 +71,13 @@ class ProbeExample:
     tools: Any
     label: str
     metadata: Dict[str, Any]
+
+
+@dataclass(frozen=True)
+class LayerSpec:
+    tag: str
+    transformer_layer: int
+    hidden_state_index: int
 
 
 def log(message: str) -> None:
@@ -279,6 +293,67 @@ def load_eval_dataset(args: argparse.Namespace):
     return dataset_obj[args.dataset_split]
 
 
+def ensure_probe_inputs(args: argparse.Namespace) -> None:
+    eval_samples_path = Path(args.eval_samples_jsonl)
+    if not eval_samples_path.exists():
+        raise FileNotFoundError(
+            "Missing MCQ evaluation samples file for probe comparison: "
+            f"{eval_samples_path}. Run the matching prompting/eval job first."
+        )
+
+    missing_train_sources = [
+        Path(source_path_text)
+        for source_path_text in args.train_source_jsonls
+        if not Path(source_path_text).exists()
+    ]
+    if not missing_train_sources:
+        return
+
+    default_source_set = {path.resolve() for path in DEFAULT_TRAIN_SOURCE_JSONLS}
+    requested_source_set = {path.resolve() for path in missing_train_sources}
+
+    if requested_source_set.issubset(default_source_set):
+        if not DEFAULT_BALANCED_SOURCE_JSONL.exists():
+            raise FileNotFoundError(
+                "Missing CAI source splits and the balanced source dataset needed to regenerate them.\n"
+                f"Expected balanced source at: {DEFAULT_BALANCED_SOURCE_JSONL}\n"
+                "Build it first with Data_Management/build_balanced_sft_dataset.py."
+            )
+        if not CAI_SPLIT_SCRIPT.exists():
+            raise FileNotFoundError(
+                "Missing CAI split generator script needed to bootstrap probe training sources: "
+                f"{CAI_SPLIT_SCRIPT}"
+            )
+
+        log("Missing CAI probe train sources; regenerating them via run_cai_split.py")
+        subprocess.run(
+            [
+                sys.executable,
+                str(CAI_SPLIT_SCRIPT),
+                "--source-jsonl",
+                str(DEFAULT_BALANCED_SOURCE_JSONL),
+            ],
+            cwd=str(CAI_DIR),
+            check=True,
+        )
+
+        still_missing = [path for path in missing_train_sources if not path.exists()]
+        if still_missing:
+            missing_text = "\n".join(str(path) for path in still_missing)
+            raise FileNotFoundError(
+                "CAI source split regeneration completed, but these probe train source files are still missing:\n"
+                f"{missing_text}"
+            )
+        return
+
+    missing_text = "\n".join(str(path) for path in missing_train_sources)
+    raise FileNotFoundError(
+        "Probe training source files are missing:\n"
+        f"{missing_text}\n"
+        "Either create them first or point --train_source_jsonls at existing files."
+    )
+
+
 def is_peft_adapter_checkpoint(path: str | Path) -> bool:
     return (Path(path) / "adapter_config.json").is_file()
 
@@ -358,6 +433,38 @@ def load_tokenizer_and_model(args: argparse.Namespace):
 
     model.eval()
     return tokenizer, model
+
+
+def resolve_layer_specs(model: AutoModelForCausalLM) -> List[LayerSpec]:
+    num_hidden_layers = int(getattr(model.config, "num_hidden_layers", 0))
+    if num_hidden_layers <= 0:
+        raise ValueError("Could not determine num_hidden_layers from model config for probe extraction.")
+
+    requested_layers = [
+        ("middle", max(1, math.ceil(num_hidden_layers * 0.50))),
+        ("layer_75pct", max(1, math.ceil(num_hidden_layers * 0.75))),
+        ("last", num_hidden_layers),
+    ]
+
+    resolved_specs: List[LayerSpec] = []
+    seen_layers = set()
+    for tag, transformer_layer in requested_layers:
+        transformer_layer = min(num_hidden_layers, max(1, transformer_layer))
+        if transformer_layer in seen_layers:
+            continue
+        resolved_specs.append(
+            LayerSpec(
+                tag=tag,
+                transformer_layer=transformer_layer,
+                hidden_state_index=transformer_layer,
+            )
+        )
+        seen_layers.add(transformer_layer)
+    return resolved_specs
+
+
+def same_layer_specs(left: Sequence[LayerSpec], right: Sequence[LayerSpec]) -> bool:
+    return [asdict(spec) for spec in left] == [asdict(spec) for spec in right]
 
 
 def source_prompt_messages(messages: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -475,6 +582,7 @@ def extract_features(
     examples: Sequence[ProbeExample],
     tokenizer: AutoTokenizer,
     model: AutoModelForCausalLM,
+    layer_specs: Sequence[LayerSpec],
     args: argparse.Namespace,
     fewshot_examples: Sequence[Dict[str, Any]],
     split_name: str,
@@ -516,11 +624,16 @@ def extract_features(
                 return_dict=True,
             )
 
-        last_hidden = outputs.hidden_states[-1]
         attention_mask = encoded["attention_mask"]
-        last_indices = attention_mask.sum(dim=1) - 1
-        row_indices = torch.arange(last_hidden.size(0), device=last_hidden.device)
-        batch_features = last_hidden[row_indices, last_indices].float().cpu().numpy().astype(np.float32)
+        last_prompt_token_indices = attention_mask.sum(dim=1) - 1
+        layer_feature_slices: List[np.ndarray] = []
+        for layer_spec in layer_specs:
+            layer_hidden = outputs.hidden_states[layer_spec.hidden_state_index]
+            row_indices = torch.arange(layer_hidden.size(0), device=layer_hidden.device)
+            layer_feature_slices.append(
+                layer_hidden[row_indices, last_prompt_token_indices].float().cpu().numpy().astype(np.float32)
+            )
+        batch_features = np.stack(layer_feature_slices, axis=1)
         batch_labels = np.asarray([LABEL_TO_ID[example.label] for example in batch_examples], dtype=np.int64)
 
         feature_batches.append(batch_features)
@@ -530,6 +643,9 @@ def extract_features(
         for example, prompt, prompt_length in zip(batch_examples, prompts, prompt_lengths):
             row_metadata = dict(example.metadata)
             row_metadata["prompt_length_tokens"] = int(prompt_length)
+            row_metadata["extracted_token_index"] = int(prompt_length) - 1
+            row_metadata["extracted_token_kind"] = "last_non_padding_token_of_prompt_only_input"
+            row_metadata["prompt_includes_target_or_mcq_answers"] = False
             row_metadata["label_id"] = LABEL_TO_ID[example.label]
             if args.save_prompt_text:
                 row_metadata["prompt_text"] = prompt
@@ -547,22 +663,50 @@ def save_feature_artifacts(
     features: np.ndarray,
     labels: np.ndarray,
     metadata_rows: Sequence[Dict[str, Any]],
+    layer_specs: Sequence[LayerSpec],
 ) -> None:
     np.savez_compressed(
         feature_path,
         X=features,
         y=labels,
         label_names=np.asarray(PROBE_LABELS),
+        layer_tags=np.asarray([spec.tag for spec in layer_specs]),
+        transformer_layers=np.asarray([spec.transformer_layer for spec in layer_specs], dtype=np.int64),
+        hidden_state_indices=np.asarray([spec.hidden_state_index for spec in layer_specs], dtype=np.int64),
     )
     write_jsonl(metadata_path, metadata_rows)
 
 
-def load_feature_artifacts(feature_path: Path, metadata_path: Path) -> tuple[np.ndarray, np.ndarray, List[Dict[str, Any]]]:
+def load_feature_artifacts(
+    feature_path: Path,
+    metadata_path: Path,
+) -> tuple[np.ndarray, np.ndarray, List[Dict[str, Any]], List[LayerSpec]]:
     with np.load(feature_path, allow_pickle=False) as payload:
         features = payload["X"]
         labels = payload["y"]
+        layer_tags = payload["layer_tags"].tolist() if "layer_tags" in payload else ["last"]
+        transformer_layers = (
+            payload["transformer_layers"].tolist()
+            if "transformer_layers" in payload
+            else [features.shape[1] if features.ndim == 3 else -1]
+        )
+        hidden_state_indices = (
+            payload["hidden_state_indices"].tolist()
+            if "hidden_state_indices" in payload
+            else [transformer_layers[0] if transformer_layers[0] != -1 else -1]
+        )
     metadata_rows = read_jsonl(metadata_path)
-    return features, labels, metadata_rows
+    if features.ndim == 2:
+        features = features[:, None, :]
+    layer_specs = [
+        LayerSpec(
+            tag=str(tag),
+            transformer_layer=int(transformer_layer),
+            hidden_state_index=int(hidden_state_index),
+        )
+        for tag, transformer_layer, hidden_state_index in zip(layer_tags, transformer_layers, hidden_state_indices)
+    ]
+    return features, labels, metadata_rows, layer_specs
 
 
 def compute_metrics(
@@ -588,7 +732,7 @@ def compute_metrics(
     }
 
 
-def train_probe(
+def train_probe_for_single_layer(
     *,
     train_features: np.ndarray,
     train_labels: np.ndarray,
@@ -665,6 +809,37 @@ def train_probe(
     return final_pipeline, training_summary
 
 
+def train_probe_suite(
+    *,
+    train_features: np.ndarray,
+    train_labels: np.ndarray,
+    layer_specs: Sequence[LayerSpec],
+    args: argparse.Namespace,
+) -> tuple[Dict[str, Pipeline], Dict[str, Any]]:
+    probe_pipelines: Dict[str, Pipeline] = {}
+    layer_summaries: Dict[str, Any] = {}
+
+    for layer_index, layer_spec in enumerate(layer_specs):
+        pipeline, summary = train_probe_for_single_layer(
+            train_features=train_features[:, layer_index, :],
+            train_labels=train_labels,
+            args=args,
+        )
+        probe_pipelines[layer_spec.tag] = pipeline
+        layer_summaries[layer_spec.tag] = {
+            **summary,
+            "transformer_layer": layer_spec.transformer_layer,
+            "hidden_state_index": layer_spec.hidden_state_index,
+        }
+
+    training_summary = {
+        "label_names": list(PROBE_LABELS),
+        "layer_specs": [asdict(spec) for spec in layer_specs],
+        "layers": layer_summaries,
+    }
+    return probe_pipelines, training_summary
+
+
 def load_eval_samples(path: Path) -> Dict[str, Dict[str, Any]]:
     rows_by_uuid: Dict[str, Dict[str, Any]] = {}
     with path.open("r", encoding="utf-8") as handle:
@@ -680,22 +855,30 @@ def load_eval_samples(path: Path) -> Dict[str, Dict[str, Any]]:
 def compare_probe_to_eval(
     *,
     test_metadata: Sequence[Dict[str, Any]],
-    probe_pred_ids: np.ndarray,
-    probe_probabilities: np.ndarray,
+    probe_predictions_by_layer: Dict[str, np.ndarray],
+    probe_probabilities_by_layer: Dict[str, np.ndarray],
     eval_samples_path: Path,
+    layer_specs: Sequence[LayerSpec],
 ) -> tuple[List[Dict[str, Any]], Dict[str, Any]]:
     eval_rows = load_eval_samples(eval_samples_path)
     combined_rows: List[Dict[str, Any]] = []
     missing_eval_rows = 0
     gold_mismatches = 0
 
-    for metadata, pred_id, pred_probs in zip(test_metadata, probe_pred_ids, probe_probabilities):
+    ordered_layer_tags = [spec.tag for spec in layer_specs]
+    per_layer_predictions = {
+        layer_tag: probe_predictions_by_layer[layer_tag].tolist() for layer_tag in ordered_layer_tags
+    }
+    per_layer_probabilities = {
+        layer_tag: probe_probabilities_by_layer[layer_tag].tolist() for layer_tag in ordered_layer_tags
+    }
+
+    for row_index, metadata in enumerate(test_metadata):
         uuid = metadata["uuid"]
         eval_row = eval_rows.get(uuid)
         if eval_row is None:
             missing_eval_rows += 1
             continue
-        probe_prediction = PROBE_LABELS[int(pred_id)]
         if eval_row["gold"] != metadata["gold"]:
             gold_mismatches += 1
         combined_rows.append(
@@ -703,9 +886,16 @@ def compare_probe_to_eval(
                 "uuid": uuid,
                 "gold": metadata["gold"],
                 "question": metadata["question"],
-                "probe_pred": probe_prediction,
+                "probe_preds": {
+                    layer_tag: PROBE_LABELS[int(per_layer_predictions[layer_tag][row_index])]
+                    for layer_tag in ordered_layer_tags
+                },
                 "probe_probs": {
-                    label: float(probability) for label, probability in zip(PROBE_LABELS, pred_probs.tolist())
+                    layer_tag: {
+                        label: float(probability)
+                        for label, probability in zip(PROBE_LABELS, per_layer_probabilities[layer_tag][row_index])
+                    }
+                    for layer_tag in ordered_layer_tags
                 },
                 "model_pred_norm": eval_row["pred_norm"],
                 "model_pred_raw": eval_row["pred_raw"],
@@ -719,62 +909,77 @@ def compare_probe_to_eval(
             f"No overlapping UUIDs were found between extracted test features and {eval_samples_path}."
         )
 
-    gold = [row["gold"] for row in combined_rows]
-    probe_pred = [row["probe_pred"] for row in combined_rows]
     model_pred_norm = [row["model_pred_norm"] for row in combined_rows]
     model_pred_raw = [row["model_pred_raw"] for row in combined_rows]
-
-    norm_in_support = [row for row in combined_rows if row["model_pred_norm"] in LABEL_TO_ID]
-    raw_in_support = [row for row in combined_rows if row["model_pred_raw"] in LABEL_TO_ID]
 
     summary = {
         "num_joined_examples": len(combined_rows),
         "num_missing_eval_rows": missing_eval_rows,
         "num_gold_mismatches_between_test_dataset_and_eval_samples": gold_mismatches,
-        "probe_vs_gold": compute_metrics(
-            gold,
-            probe_pred,
-            labels=PROBE_LABELS,
-            target_names=PROBE_LABELS,
-        ),
         "model_pred_norm_vs_gold": compute_metrics(
-            gold,
+            [row["gold"] for row in combined_rows],
             model_pred_norm,
             labels=PROBE_LABELS,
             target_names=PROBE_LABELS,
         ),
         "model_pred_raw_vs_gold": compute_metrics(
-            gold,
+            [row["gold"] for row in combined_rows],
             model_pred_raw,
             labels=PROBE_LABELS,
             target_names=PROBE_LABELS,
         ),
-        "probe_vs_model_pred_norm": {
-            "overall_agreement": float(np.mean([row["probe_pred"] == row["model_pred_norm"] for row in combined_rows])),
-            "num_model_predictions_in_probe_label_space": len(norm_in_support),
-            "num_model_predictions_outside_probe_label_space": len(combined_rows) - len(norm_in_support),
-        },
-        "probe_vs_model_pred_raw": {
-            "overall_agreement": float(np.mean([row["probe_pred"] == row["model_pred_raw"] for row in combined_rows])),
-            "num_model_predictions_in_probe_label_space": len(raw_in_support),
-            "num_model_predictions_outside_probe_label_space": len(combined_rows) - len(raw_in_support),
-        },
+        "layer_specs": [asdict(spec) for spec in layer_specs],
+        "layers": {},
     }
 
-    if norm_in_support:
-        summary["probe_vs_model_pred_norm"]["restricted_to_probe_label_space"] = compute_metrics(
-            [row["model_pred_norm"] for row in norm_in_support],
-            [row["probe_pred"] for row in norm_in_support],
-            labels=PROBE_LABELS,
-            target_names=PROBE_LABELS,
-        )
-    if raw_in_support:
-        summary["probe_vs_model_pred_raw"]["restricted_to_probe_label_space"] = compute_metrics(
-            [row["model_pred_raw"] for row in raw_in_support],
-            [row["probe_pred"] for row in raw_in_support],
-            labels=PROBE_LABELS,
-            target_names=PROBE_LABELS,
-        )
+    gold = [row["gold"] for row in combined_rows]
+    for layer_spec in layer_specs:
+        layer_tag = layer_spec.tag
+        probe_pred = [row["probe_preds"][layer_tag] for row in combined_rows]
+        norm_in_support = [row for row in combined_rows if row["model_pred_norm"] in LABEL_TO_ID]
+        raw_in_support = [row for row in combined_rows if row["model_pred_raw"] in LABEL_TO_ID]
+
+        layer_summary = {
+            "transformer_layer": layer_spec.transformer_layer,
+            "hidden_state_index": layer_spec.hidden_state_index,
+            "probe_vs_gold": compute_metrics(
+                gold,
+                probe_pred,
+                labels=PROBE_LABELS,
+                target_names=PROBE_LABELS,
+            ),
+            "probe_vs_model_pred_norm": {
+                "overall_agreement": float(
+                    np.mean([row["probe_preds"][layer_tag] == row["model_pred_norm"] for row in combined_rows])
+                ),
+                "num_model_predictions_in_probe_label_space": len(norm_in_support),
+                "num_model_predictions_outside_probe_label_space": len(combined_rows) - len(norm_in_support),
+            },
+            "probe_vs_model_pred_raw": {
+                "overall_agreement": float(
+                    np.mean([row["probe_preds"][layer_tag] == row["model_pred_raw"] for row in combined_rows])
+                ),
+                "num_model_predictions_in_probe_label_space": len(raw_in_support),
+                "num_model_predictions_outside_probe_label_space": len(combined_rows) - len(raw_in_support),
+            },
+        }
+
+        if norm_in_support:
+            layer_summary["probe_vs_model_pred_norm"]["restricted_to_probe_label_space"] = compute_metrics(
+                [row["model_pred_norm"] for row in norm_in_support],
+                [row["probe_preds"][layer_tag] for row in norm_in_support],
+                labels=PROBE_LABELS,
+                target_names=PROBE_LABELS,
+            )
+        if raw_in_support:
+            layer_summary["probe_vs_model_pred_raw"]["restricted_to_probe_label_space"] = compute_metrics(
+                [row["model_pred_raw"] for row in raw_in_support],
+                [row["probe_preds"][layer_tag] for row in raw_in_support],
+                labels=PROBE_LABELS,
+                target_names=PROBE_LABELS,
+            )
+
+        summary["layers"][layer_tag] = layer_summary
 
     return combined_rows, summary
 
@@ -804,11 +1009,14 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
 
     save_json(run_config_path, sanitized_args_dict(args))
 
+    ensure_probe_inputs(args)
+
     log("Loading prompt few-shot exemplars")
     fewshot_examples = load_fewshot_examples(args.fewshot_json, args.num_shots)
 
     tokenizer = None
     model = None
+    layer_specs: List[LayerSpec] = []
 
     need_train_extraction = not (args.reuse_features and train_feature_path.exists() and train_metadata_path.exists())
     need_test_extraction = not (args.reuse_features and test_feature_path.exists() and test_metadata_path.exists())
@@ -822,6 +1030,11 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             )
         log("Loading tokenizer and model for hidden-state extraction")
         tokenizer, model = load_tokenizer_and_model(args)
+        layer_specs = resolve_layer_specs(model)
+        log(
+            "Selected probe layers: "
+            + ", ".join(f"{spec.tag}=L{spec.transformer_layer}" for spec in layer_specs)
+        )
 
     if need_train_extraction:
         log("Preparing combined CAI source rows for probe training")
@@ -831,6 +1044,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             examples=train_examples,
             tokenizer=tokenizer,
             model=model,
+            layer_specs=layer_specs,
             args=args,
             fewshot_examples=fewshot_examples,
             split_name="train",
@@ -841,11 +1055,19 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             features=train_features,
             labels=train_labels,
             metadata_rows=train_metadata,
+            layer_specs=layer_specs,
         )
         log(f"Saved train features to {train_feature_path}")
     else:
         log(f"Reusing train features from {train_feature_path}")
-        train_features, train_labels, train_metadata = load_feature_artifacts(train_feature_path, train_metadata_path)
+        train_features, train_labels, train_metadata, layer_specs = load_feature_artifacts(
+            train_feature_path,
+            train_metadata_path,
+        )
+        log(
+            "Loaded cached probe layers: "
+            + ", ".join(f"{spec.tag}=L{spec.transformer_layer}" for spec in layer_specs)
+        )
 
     if need_test_extraction:
         log("Preparing When2Call test MCQ rows for probe evaluation")
@@ -855,6 +1077,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             examples=test_examples,
             tokenizer=tokenizer,
             model=model,
+            layer_specs=layer_specs,
             args=args,
             fewshot_examples=fewshot_examples,
             split_name="test",
@@ -865,11 +1088,22 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             features=test_features,
             labels=test_labels,
             metadata_rows=test_metadata,
+            layer_specs=layer_specs,
         )
         log(f"Saved test features to {test_feature_path}")
     else:
         log(f"Reusing test features from {test_feature_path}")
-        test_features, test_labels, test_metadata = load_feature_artifacts(test_feature_path, test_metadata_path)
+        test_features, test_labels, test_metadata, cached_test_layer_specs = load_feature_artifacts(
+            test_feature_path,
+            test_metadata_path,
+        )
+        if not layer_specs:
+            layer_specs = cached_test_layer_specs
+        elif not same_layer_specs(layer_specs, cached_test_layer_specs):
+            raise ValueError(
+                "Cached test features were extracted from different probe layers than the current train features. "
+                "Delete the cached feature files or rerun without --reuse_features."
+            )
 
     if model is not None:
         del model
@@ -878,32 +1112,41 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
 
-    log("Training multinomial logistic regression probe")
-    probe_pipeline, training_summary = train_probe(
+    log("Training multinomial logistic regression probes")
+    probe_pipelines, training_summary = train_probe_suite(
         train_features=train_features,
         train_labels=train_labels,
+        layer_specs=layer_specs,
         args=args,
     )
     with open(probe_model_path, "wb") as handle:
         pickle.dump(
             {
-                "pipeline": probe_pipeline,
+                "pipelines": probe_pipelines,
                 "label_names": PROBE_LABELS,
+                "layer_specs": [asdict(spec) for spec in layer_specs],
             },
             handle,
         )
     save_json(training_summary_path, training_summary)
     log(f"Saved probe model to {probe_model_path}")
 
-    log("Running probe on test hidden states")
-    probe_pred_ids = probe_pipeline.predict(test_features)
-    probe_probabilities = probe_pipeline.predict_proba(test_features)
+    log("Running probes on test hidden states")
+    probe_predictions_by_layer = {
+        layer_spec.tag: probe_pipelines[layer_spec.tag].predict(test_features[:, layer_index, :])
+        for layer_index, layer_spec in enumerate(layer_specs)
+    }
+    probe_probabilities_by_layer = {
+        layer_spec.tag: probe_pipelines[layer_spec.tag].predict_proba(test_features[:, layer_index, :])
+        for layer_index, layer_spec in enumerate(layer_specs)
+    }
 
     combined_rows, evaluation_summary = compare_probe_to_eval(
         test_metadata=test_metadata,
-        probe_pred_ids=probe_pred_ids,
-        probe_probabilities=probe_probabilities,
+        probe_predictions_by_layer=probe_predictions_by_layer,
+        probe_probabilities_by_layer=probe_probabilities_by_layer,
         eval_samples_path=Path(args.eval_samples_jsonl),
+        layer_specs=layer_specs,
     )
     save_json(evaluation_summary_path, evaluation_summary)
     write_jsonl(comparison_jsonl_path, combined_rows)
