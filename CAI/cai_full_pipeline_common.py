@@ -68,10 +68,15 @@ def local_or_cached_model_path(model_name_or_path: str, cache_root: Path, hf_tok
         log(f"Model already available locally: {resolved}")
         return resolved
 
+    local_dir = ensure_dir(cache_root / sanitize_model_name(model_name_or_path))
+    if any(local_dir.iterdir()):
+        resolved = str(local_dir.resolve())
+        log(f"Model found in local cache: {resolved}")
+        return resolved
+
     if snapshot_download is None:
         raise ImportError("huggingface_hub is required for model prefetching.")
 
-    local_dir = ensure_dir(cache_root / sanitize_model_name(model_name_or_path))
     log(f"Prefetching model {model_name_or_path} into {local_dir}")
     snapshot_download(
         repo_id=model_name_or_path,
