@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=cai_full_gemma
 #SBATCH --output=%x.%j.out
-#SBATCH --error=%x.%j.out
+#SBATCH --error=%x.%j.err
 #SBATCH --partition=class
 #SBATCH --account=class
 #SBATCH --qos=default
@@ -17,6 +17,7 @@
 
 set -euo pipefail
 
+source ~/.bashrc
 REPO_ROOT="/fs/classhomes/mukunds/Tool-Call-Decision-Making"
 VENV_DIR="${REPO_ROOT}/.venv"
 
