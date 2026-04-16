@@ -56,11 +56,11 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument(
         "--output-jsonl",
-        default=str(DEFAULT_OUTPUT_DIR / "when2call_balanced_sft_3x3000.jsonl"),
+        default=str(DEFAULT_OUTPUT_DIR / "when2call_balanced_sft.jsonl"),
     )
     parser.add_argument(
         "--output-summary",
-        default=str(DEFAULT_OUTPUT_DIR / "when2call_balanced_sft_3x3000.summary.json"),
+        default=str(DEFAULT_OUTPUT_DIR / "when2call_balanced_sft.summary.json"),
     )
     parser.add_argument(
         "--allow-hf-fallback",
