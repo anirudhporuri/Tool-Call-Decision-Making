@@ -24,11 +24,13 @@ Data_Management/generated_datasets/
 CAI/generated_datasets/
 CAI/outputs/
 CAI/logs/
+Probe Baselines/outputs/
 
 # Common local model / checkpoint directories
 models/
 checkpoints/
 **/checkpoint-*/
+cluster_cache/
 
 # Common model weight files
 *.safetensors
