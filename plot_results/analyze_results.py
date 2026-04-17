@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Tuple
 
@@ -41,27 +42,27 @@ from plotnine import (
 
 FAMILY_ORDER = {"llama": 0, "gemma": 1}
 VARIANT_ORDER = {
-    "0-shot": 0,
+    "Zero-shot": 0,
     "4-shot": 1,
     "SFT": 2,
     "DPO": 3,
-    "Probe-middle": 4,
-    "Probe-75pct": 5,
-    "Probe-last": 6,
+    "Probe (Middle Layer)": 4,
+    "Probe (75% Depth Layer)": 5,
+    "Probe (Last Layer)": 6,
 }
 PROBE_VARIANT_BY_TAG = {
-    "middle": "Probe-middle",
-    "layer_75pct": "Probe-75pct",
-    "75pct": "Probe-75pct",
-    "last": "Probe-last",
+    "middle": "Probe (Middle Layer)",
+    "layer_75pct": "Probe (75% Depth Layer)",
+    "75pct": "Probe (75% Depth Layer)",
+    "last": "Probe (Last Layer)",
 }
 DEFAULT_LABEL_ORDER = ["direct", "tool_call", "request_for_info", "cannot_answer"]
 PRIMARY_BEHAVIOR_CLASSES = ["tool_call", "request_for_info", "cannot_answer"]
 CLASS_DISPLAY = {
-    "direct": "direct",
-    "tool_call": "tool_call",
-    "request_for_info": "request_for_info",
-    "cannot_answer": "cannot_answer",
+    "direct": "Direct",
+    "tool_call": "Tool call",
+    "request_for_info": "Request for info",
+    "cannot_answer": "Cannot answer",
 }
 OUTCOME_ORDER = ["stay_correct", "fixed", "broken", "stay_wrong"]
 OUTCOME_COLORS = {
@@ -79,10 +80,10 @@ FAMILY_COLORS = {
     "gemma": "#e67e22",
 }
 PREDICTION_COLORS = {
-    "tool_call": "#1f78b4",
-    "request_for_info": "#2ca02c",
-    "cannot_answer": "#d62728",
-    "direct": "#9467bd",
+    "Tool call": "#1f78b4",
+    "Request for info": "#2ca02c",
+    "Cannot answer": "#d62728",
+    "Direct": "#9467bd",
 }
 
 
@@ -180,7 +181,7 @@ def infer_variant_label(run_key: str, run_config: Dict[str, Any]) -> str:
     if "4shot" in haystack or num_shots == 4:
         return "4-shot"
     if num_shots == 0:
-        return "0-shot"
+        return "Zero-shot"
     return f"{num_shots}-shot"
 
 
@@ -189,11 +190,11 @@ def infer_probe_variant_label(layer_tag: str) -> str:
     if key in PROBE_VARIANT_BY_TAG:
         return PROBE_VARIANT_BY_TAG[key]
     if "75" in key:
-        return "Probe-75pct"
+        return "Probe (75% Depth Layer)"
     if "mid" in key:
-        return "Probe-middle"
+        return "Probe (Middle Layer)"
     if "last" in key:
-        return "Probe-last"
+        return "Probe (Last Layer)"
     return f"Probe-{layer_tag}"
 
 
@@ -229,6 +230,10 @@ def family_display_names(model_family: str) -> Tuple[str, str]:
     if model_family == "gemma":
         return "Gemma 3 4B", "Gemma"
     return model_family, model_family
+
+
+def make_run_display(family_short: str, variant_label: str) -> str:
+    return f"{family_short} {variant_label}"
 
 
 def extract_class_metrics(
@@ -624,8 +629,9 @@ def make_summary_charts(
 
     pred_mix_plot_df = prediction_mix_df[prediction_mix_df["scoring"] == "normalized"].copy()
     pred_mix_plot_df = apply_run_order(pred_mix_plot_df, run_order)
+    pred_mix_plot_df["label_display"] = pred_mix_plot_df["label"].map(CLASS_DISPLAY).fillna(pred_mix_plot_df["label"])
     pred_mix_plot = (
-        ggplot(pred_mix_plot_df, aes(x="run_display", y="fraction", fill="label"))
+        ggplot(pred_mix_plot_df, aes(x="run_display", y="fraction", fill="label_display"))
         + geom_col(width=0.75)
         + coord_flip()
         + scale_fill_manual(values=PREDICTION_COLORS)
@@ -720,8 +726,9 @@ def make_summary_charts(
                 )
             ].copy()
         no_probe_mix_df = apply_run_order(no_probe_mix_df, no_probe_order)
+        no_probe_mix_df["label_display"] = no_probe_mix_df["label"].map(CLASS_DISPLAY).fillna(no_probe_mix_df["label"])
         no_probe_mix_plot = (
-            ggplot(no_probe_mix_df, aes(x="run_display", y="fraction", fill="label"))
+            ggplot(no_probe_mix_df, aes(x="run_display", y="fraction", fill="label_display"))
             + geom_col(width=0.75)
             + coord_flip()
             + scale_fill_manual(values=PREDICTION_COLORS)
@@ -796,6 +803,180 @@ def write_summary_markdown(
         ),
     ]
     summary_path.write_text("\n".join(lines), encoding="utf-8")
+
+
+def write_full_analysis_markdown(
+    *,
+    runs_df: pd.DataFrame,
+    class_df: pd.DataFrame,
+    direct_df: pd.DataFrame,
+    outcome_df: pd.DataFrame,
+    output_path: Path,
+) -> None:
+    runs = runs_df.copy()
+    if "is_probe" not in runs.columns:
+        runs["is_probe"] = False
+    runs["is_probe"] = runs["is_probe"].fillna(False).astype(bool)
+    runs["delta_accuracy"] = runs["norm_accuracy"] - runs["raw_accuracy"]
+    runs["delta_macro_f1"] = runs["norm_macro_f1"] - runs["raw_macro_f1"]
+    runs["run_type"] = runs["is_probe"].map(lambda x: "Probe" if x else "Prompting")
+
+    top_acc = runs.sort_values("norm_accuracy", ascending=False).head(6)
+    top_f1 = runs.sort_values("norm_macro_f1", ascending=False).head(6)
+
+    non_probe = runs[~runs["is_probe"]].copy()
+    probe_only = runs[runs["is_probe"]].copy()
+
+    lines: List[str] = [
+        "# Full Analysis of Prompting + Probe Results",
+        "",
+        f"_Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}_",
+        "",
+        "## What Normalization Means",
+        "",
+        "- `raw` metrics score model outputs exactly as emitted.",
+        "- `normalized` metrics apply your output normalization before scoring (mapping surface-form variants into the target label set).",
+        "- Positive `normalized - raw` means normalization fixed output-format mismatches; negative means normalization hurt that run.",
+        "",
+        "## What `75pct` Means",
+        "",
+        "- `Probe (75% Depth Layer)` means the probe reads hidden states from roughly 75% through the transformer depth.",
+        "- It is an intermediate representation between the middle layer and the final layer (`Probe (Last Layer)`).",
+        "",
+        "## Top Runs by Normalized Accuracy",
+        "",
+        "| Rank | Run | Type | Norm Acc | Norm Macro-F1 |",
+        "|---|---|---|---:|---:|",
+    ]
+    for idx, (_, row) in enumerate(top_acc.iterrows(), start=1):
+        lines.append(
+            f"| {idx} | {row['run_display']} | {row['run_type']} | {row['norm_accuracy']:.1%} | {row['norm_macro_f1']:.1%} |"
+        )
+
+    lines.extend(
+        [
+            "",
+            "## Top Runs by Normalized Macro-F1",
+            "",
+            "| Rank | Run | Type | Norm Macro-F1 | Norm Acc |",
+            "|---|---|---|---:|---:|",
+        ]
+    )
+    for idx, (_, row) in enumerate(top_f1.iterrows(), start=1):
+        lines.append(
+            f"| {idx} | {row['run_display']} | {row['run_type']} | {row['norm_macro_f1']:.1%} | {row['norm_accuracy']:.1%} |"
+        )
+
+    if not non_probe.empty:
+        best_norm_gain_acc = non_probe.loc[non_probe["delta_accuracy"].idxmax()]
+        worst_norm_gain_acc = non_probe.loc[non_probe["delta_accuracy"].idxmin()]
+        best_norm_gain_f1 = non_probe.loc[non_probe["delta_macro_f1"].idxmax()]
+        avg_delta_acc = non_probe["delta_accuracy"].mean()
+        avg_delta_f1 = non_probe["delta_macro_f1"].mean()
+        lines.extend(
+            [
+                "",
+                "## Normalization Impact (Prompting Runs Only)",
+                "",
+                f"- Average accuracy delta (`normalized - raw`): **{avg_delta_acc:+.3f}**.",
+                f"- Average macro-F1 delta (`normalized - raw`): **{avg_delta_f1:+.3f}**.",
+                f"- Largest accuracy improvement: **{best_norm_gain_acc['run_display']}** ({best_norm_gain_acc['delta_accuracy']:+.3f}).",
+                f"- Largest macro-F1 improvement: **{best_norm_gain_f1['run_display']}** ({best_norm_gain_f1['delta_macro_f1']:+.3f}).",
+                f"- Most negative normalization impact on accuracy: **{worst_norm_gain_acc['run_display']}** ({worst_norm_gain_acc['delta_accuracy']:+.3f}).",
+            ]
+        )
+
+    if not probe_only.empty:
+        probe_table = probe_only.sort_values(["model_family", "variant_rank", "run_key"])
+        lines.extend(
+            [
+                "",
+                "## Probe-Layer Performance",
+                "",
+                "| Run | Norm Acc | Norm Macro-F1 |",
+                "|---|---:|---:|",
+            ]
+        )
+        for _, row in probe_table.iterrows():
+            lines.append(f"| {row['run_display']} | {row['norm_accuracy']:.1%} | {row['norm_macro_f1']:.1%} |")
+
+    class_norm = class_df[
+        (class_df["scoring"] == "normalized") & (class_df["behavior_class"].isin(PRIMARY_BEHAVIOR_CLASSES))
+    ].copy()
+    if not class_norm.empty:
+        mean_by_class = (
+            class_norm.groupby("behavior_class", as_index=False)[["accuracy", "precision", "recall", "f1"]].mean()
+        )
+        mean_by_class["class_display"] = mean_by_class["behavior_class"].map(CLASS_DISPLAY)
+        hardest = mean_by_class.sort_values("recall", ascending=True).iloc[0]
+        easiest = mean_by_class.sort_values("recall", ascending=False).iloc[0]
+        lines.extend(
+            [
+                "",
+                "## Class-Level Pattern (Normalized)",
+                "",
+                f"- Hardest class by average recall: **{hardest['class_display']}** ({hardest['recall']:.1%}).",
+                f"- Easiest class by average recall: **{easiest['class_display']}** ({easiest['recall']:.1%}).",
+                "",
+                "| Class | Avg Accuracy | Avg Precision | Avg Recall | Avg F1 |",
+                "|---|---:|---:|---:|---:|",
+            ]
+        )
+        for _, row in mean_by_class.sort_values("behavior_class").iterrows():
+            lines.append(
+                f"| {row['class_display']} | {row['accuracy']:.1%} | {row['precision']:.1%} | {row['recall']:.1%} | {row['f1']:.1%} |"
+            )
+
+    if not direct_df.empty:
+        direct_norm = direct_df[direct_df["scoring"] == "normalized"].copy()
+        if not direct_norm.empty:
+            highest_direct = direct_norm.sort_values("direct_prediction_rate", ascending=False).iloc[0]
+            lowest_direct = direct_norm.sort_values("direct_prediction_rate", ascending=True).iloc[0]
+            lines.extend(
+                [
+                    "",
+                    "## Unsupported `direct` Prediction Behavior",
+                    "",
+                    f"- Highest normalized `direct` rate: **{highest_direct['run_display']}** ({highest_direct['direct_prediction_rate']:.1%}).",
+                    f"- Lowest normalized `direct` rate: **{lowest_direct['run_display']}** ({lowest_direct['direct_prediction_rate']:.1%}).",
+                ]
+            )
+
+    if not outcome_df.empty:
+        outcome_mean = outcome_df.groupby("outcome", as_index=False)["fraction"].mean()
+        fixed = float(outcome_mean[outcome_mean["outcome"] == "fixed"]["fraction"].iloc[0]) if "fixed" in set(
+            outcome_mean["outcome"]
+        ) else 0.0
+        broken = float(outcome_mean[outcome_mean["outcome"] == "broken"]["fraction"].iloc[0]) if "broken" in set(
+            outcome_mean["outcome"]
+        ) else 0.0
+        lines.extend(
+            [
+                "",
+                "## Normalization Outcomes (Averaged Over Prompting Runs)",
+                "",
+                f"- Average `fixed` fraction: **{fixed:.1%}**.",
+                f"- Average `broken` fraction: **{broken:.1%}**.",
+                (
+                    "- Net normalization effect: **helpful on average**."
+                    if fixed >= broken
+                    else "- Net normalization effect: **harmful on average**."
+                ),
+            ]
+        )
+
+    lines.extend(
+        [
+            "",
+            "## Bottom Line",
+            "",
+            "- Probe-layer runs are now included directly in the same comparison framework as prompting runs.",
+            "- `Probe (75% Depth Layer)` is the probe at roughly three-quarters of transformer depth, not a dataset percentage.",
+            "- Use the `_without_probe` plots for apples-to-apples prompting-only comparisons.",
+        ]
+    )
+
+    output_path.write_text("\n".join(lines), encoding="utf-8")
 
 
 def latex_escape(text: str) -> str:
@@ -888,7 +1069,7 @@ def main() -> None:
         model_family = infer_model_family(run_key, run_config)
         variant_label = infer_variant_label(run_key, run_config)
         _, family_short = family_display_names(model_family)
-        run_display = f"{family_short} {variant_label} ({run_key})"
+        run_display = make_run_display(family_short, variant_label)
 
         run_records.append(
             {
@@ -959,7 +1140,7 @@ def main() -> None:
 
             variant_label = infer_probe_variant_label(layer_tag)
             run_key = f"{probe_dir.name}:{layer_tag}"
-            run_display = f"{family_short} {variant_label} ({run_key})"
+            run_display = make_run_display(family_short, variant_label)
             n_examples = int(probe_eval.get("num_joined_examples", 0) or 0)
             probe_accuracy = float(probe_vs_gold.get("accuracy", 0.0) or 0.0)
             probe_macro_f1 = float(
@@ -1059,6 +1240,13 @@ def main() -> None:
         class_df=class_df,
         direct_df=direct_df,
         summary_path=output_dir / "analysis_summary.md",
+    )
+    write_full_analysis_markdown(
+        runs_df=runs_df,
+        class_df=class_df,
+        direct_df=direct_df,
+        outcome_df=outcome_df,
+        output_path=output_dir / "analysis.md",
     )
 
     print(json.dumps({"runs_analyzed": int(len(runs_df)), "output_dir": str(output_dir)}, indent=2))
