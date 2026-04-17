@@ -41,6 +41,7 @@ from w2c_prompts import build_prompt  # noqa: E402
 DEFAULT_DATASET_DIR = REPO_ROOT / "local_datasets"
 DEFAULT_MODEL_CACHE_DIR = REPO_ROOT / "cluster_cache" / "model_cache"
 DEFAULT_HF_HOME_DIR = REPO_ROOT / "cluster_cache" / "hf_home"
+DEFAULT_FEWSHOT_JSON = REPO_ROOT / "Prompting Baselines" / "fewshot_examples.template.json"
 DEFAULT_BALANCED_SOURCE_JSONL = (
     REPO_ROOT / "Data_Management" / "generated_datasets" / "when2call_balanced_sft.jsonl"
 )
@@ -114,6 +115,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--hf_home_dir", default=str(DEFAULT_HF_HOME_DIR))
     parser.add_argument("--fewshot_json", default=None)
     parser.add_argument("--num_shots", type=int, default=0)
+    parser.add_argument("--use_4shot_prompt", action="store_true", default=env_flag("USE_4SHOT_PROMPT", False))
     parser.add_argument("--hf_token", default=os.getenv("HF_TOKEN"))
     parser.add_argument("--dtype", default="bfloat16", choices=["float16", "bfloat16", "float32"])
     parser.add_argument("--attn_implementation", default=None)
@@ -166,6 +168,12 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         help=argparse.SUPPRESS,
     )
     args = parser.parse_args(argv)
+    if args.use_4shot_prompt:
+        if args.num_shots not in {0, 4}:
+            parser.error("--use_4shot_prompt is only compatible with --num_shots 4.")
+        args.num_shots = 4
+        if not args.fewshot_json:
+            args.fewshot_json = str(DEFAULT_FEWSHOT_JSON)
     if args.num_shots > 0 and not args.fewshot_json:
         parser.error("--fewshot_json is required when --num_shots > 0.")
     return args

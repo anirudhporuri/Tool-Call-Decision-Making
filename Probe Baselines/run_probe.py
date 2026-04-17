@@ -9,6 +9,7 @@ from typing import List, Optional, Sequence
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_DATASET_DIR = REPO_ROOT / "local_datasets"
+DEFAULT_FEWSHOT_JSON = REPO_ROOT / "Prompting Baselines" / "fewshot_examples.template.json"
 DEFAULT_TRAIN_SOURCE_JSONLS = [
     REPO_ROOT / "CAI" / "generated_datasets" / "train_pref_cai_sft_source.jsonl",
     REPO_ROOT / "CAI" / "generated_datasets" / "train_pref_cai_dpo_source.jsonl",
@@ -42,6 +43,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--hf-home-dir", default=os.getenv("HF_HOME_DIR", str(REPO_ROOT / "cluster_cache" / "hf_home")))
     parser.add_argument("--fewshot-json", default=None)
     parser.add_argument("--num-shots", type=int, default=0)
+    parser.add_argument("--use-4shot-prompt", action="store_true", default=env_flag("USE_4SHOT_PROMPT", False))
     parser.add_argument("--hf-token", default=os.getenv("HF_TOKEN"))
     parser.add_argument("--dtype", default=os.getenv("DTYPE", "bfloat16"))
     parser.add_argument("--attn-implementation", default=os.getenv("ATTN_IMPL"))
@@ -66,6 +68,12 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--no-prefetch-models", dest="prefetch_models", action="store_false")
 
     args = parser.parse_args(argv)
+    if args.use_4shot_prompt:
+        if args.num_shots not in {0, 4}:
+            parser.error("--use-4shot-prompt is only compatible with --num-shots 4.")
+        args.num_shots = 4
+        if not args.fewshot_json:
+            args.fewshot_json = str(DEFAULT_FEWSHOT_JSON)
     if args.num_shots > 0 and not args.fewshot_json:
         parser.error("--fewshot-json is required when --num-shots > 0.")
     return args
@@ -135,6 +143,8 @@ def build_probe_argv(args: argparse.Namespace) -> List[str]:
         forwarded.append("--trust_remote_code")
     if args.load_in_4bit:
         forwarded.append("--load_in_4bit")
+    if args.use_4shot_prompt:
+        forwarded.append("--use_4shot_prompt")
     if args.prefetch_models:
         forwarded.append("--prefetch_models")
     return forwarded
