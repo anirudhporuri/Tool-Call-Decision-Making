@@ -1,0 +1,21 @@
+% Requires: \usepackage{booktabs}
+\begin{table}[t]
+  \centering
+  \small
+  \begin{tabular}{lrrrrrr}
+    \toprule
+    Run & Raw Acc & Norm Acc & $\Delta$ Acc & Raw Macro-F1 & Norm Macro-F1 & $\Delta$ Macro-F1 \\
+    \midrule
+    Llama 0-shot (llama32\_3b\_zeroshot) & 0.377 & 0.471 & +0.093 & 0.173 & 0.307 & +0.135 \\
+    Llama 4-shot (llama32\_3b\_4shot) & 0.445 & 0.590 & +0.145 & 0.268 & 0.432 & +0.164 \\
+    Llama SFT (llama32\_3b\_sft\_zeroshot\_eval) & 0.740 & 0.799 & +0.059 & 0.545 & 0.590 & +0.045 \\
+    Llama DPO (llama32\_3b\_dpo\_zeroshot\_eval) & 0.432 & 0.585 & +0.153 & 0.245 & 0.418 & +0.173 \\
+    Gemma 0-shot (gemma3\_4b\_zeroshot) & 0.299 & 0.280 & -0.019 & 0.240 & 0.237 & -0.003 \\
+    Gemma 4-shot (gemma3\_4b\_4shot) & 0.284 & 0.274 & -0.010 & 0.236 & 0.235 & -0.001 \\
+    Gemma SFT (gemma3\_4b\_sft\_zeroshot\_eval) & 0.329 & 0.282 & -0.046 & 0.260 & 0.235 & -0.026 \\
+    Gemma DPO (gemma3\_4b\_dpo\_zeroshot\_eval) & 0.307 & 0.287 & -0.021 & 0.247 & 0.242 & -0.005 \\
+    \bottomrule
+  \end{tabular}
+  \caption{Raw vs. normalized scoring comparison by run.}
+  \label{tab:raw-vs-normalized-scoring}
+\end{table}

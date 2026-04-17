@@ -174,10 +174,22 @@ def extract_class_metrics(
     records: List[Dict[str, Any]] = []
     for scoring in ("raw", "normalized"):
         class_report = summary.get(scoring, {}).get("classification_report", {})
+        cm = summary.get(scoring, {}).get("confusion_matrix", [])
+        if not cm:
+            continue
+        total = float(sum(sum(int(x) for x in row) for row in cm))
+        row_sums = [float(sum(int(x) for x in row)) for row in cm]
+        col_sums = [float(sum(int(cm[r][c]) for r in range(len(cm)))) for c in range(len(cm))]
         for label in label_order:
             if label not in class_report:
                 continue
             metrics = class_report[label]
+            idx = label_order.index(label)
+            tp = float(cm[idx][idx]) if idx < len(cm) and idx < len(cm[idx]) else 0.0
+            fn = row_sums[idx] - tp if idx < len(row_sums) else 0.0
+            fp = col_sums[idx] - tp if idx < len(col_sums) else 0.0
+            tn = total - tp - fn - fp
+            one_vs_rest_accuracy = (tp + tn) / total if total > 0 else 0.0
             records.append(
                 {
                     "run_key": run_key,
@@ -186,6 +198,7 @@ def extract_class_metrics(
                     "variant_label": variant_label,
                     "scoring": scoring,
                     "behavior_class": label,
+                    "accuracy": one_vs_rest_accuracy,
                     "precision": float(metrics.get("precision", 0.0)),
                     "recall": float(metrics.get("recall", 0.0)),
                     "f1": float(metrics.get("f1-score", 0.0)),
@@ -344,6 +357,19 @@ def save_plot_multi(
     save_plot(plot_obj, figures_dir / f"{base_name}.pdf", width=width, height=height)
 
 
+def remove_stale_figures(figures_dir: Path) -> None:
+    stale_basenames = [
+        "accuracy_raw_vs_normalized_by_run",
+        "macro_f1_raw_vs_normalized_by_run",
+        "normalized_recall_heatmap_by_class",
+    ]
+    for base in stale_basenames:
+        for ext in ("png", "pdf"):
+            path = figures_dir / f"{base}.{ext}"
+            if path.exists():
+                path.unlink()
+
+
 def make_summary_charts(
     *,
     runs_df: pd.DataFrame,
@@ -425,117 +451,41 @@ def make_summary_charts(
         height=6,
     )
 
-    acc_delta = runs_plot[["run_display", "raw_accuracy", "norm_accuracy"]].copy()
-    acc_long = acc_delta.melt(
-        id_vars=["run_display"],
-        value_vars=["raw_accuracy", "norm_accuracy"],
-        var_name="scoring",
-        value_name="value",
-    )
-    acc_long["scoring"] = acc_long["scoring"].map(
-        {"raw_accuracy": "raw", "norm_accuracy": "normalized"}
-    )
-    acc_seg = acc_delta.rename(columns={"raw_accuracy": "x", "norm_accuracy": "xend"})
-    acc_change_plot = (
-        ggplot(acc_long, aes(x="value", y="run_display"))
-        + geom_segment(
-            data=acc_seg,
-            mapping=aes(x="x", xend="xend", y="run_display", yend="run_display"),
-            inherit_aes=False,
-            color="#adb5bd",
-            size=0.8,
-        )
-        + geom_point(aes(color="scoring"), size=2.8)
-        + scale_color_manual(values=SCORING_COLORS)
-        + scale_x_continuous(
-            labels=percent_format(),
-            limits=(0.0, 1.0),
-            breaks=[0.0, 0.2, 0.4, 0.6, 0.8, 1.0],
-        )
-        + labs(
-            title="Accuracy Change: Raw vs Normalized Scoring",
-            x="Accuracy",
-            y="",
-            color="Scoring",
-        )
-        + theme_bw()
-        + theme(figure_size=(11, 6), axis_text_y=element_text(size=9))
-    )
-    save_plot_multi(
-        acc_change_plot,
-        figures_dir=figures_dir,
-        base_name="accuracy_raw_vs_normalized_by_run",
-        width=11,
-        height=6,
-    )
-
-    f1_delta = runs_plot[["run_display", "raw_macro_f1", "norm_macro_f1"]].copy()
-    f1_long = f1_delta.melt(
-        id_vars=["run_display"],
-        value_vars=["raw_macro_f1", "norm_macro_f1"],
-        var_name="scoring",
-        value_name="value",
-    )
-    f1_long["scoring"] = f1_long["scoring"].map(
-        {"raw_macro_f1": "raw", "norm_macro_f1": "normalized"}
-    )
-    f1_seg = f1_delta.rename(columns={"raw_macro_f1": "x", "norm_macro_f1": "xend"})
-    f1_change_plot = (
-        ggplot(f1_long, aes(x="value", y="run_display"))
-        + geom_segment(
-            data=f1_seg,
-            mapping=aes(x="x", xend="xend", y="run_display", yend="run_display"),
-            inherit_aes=False,
-            color="#adb5bd",
-            size=0.8,
-        )
-        + geom_point(aes(color="scoring"), size=2.8)
-        + scale_color_manual(values=SCORING_COLORS)
-        + labs(
-            title="Macro-F1 Change: Raw vs Normalized Scoring",
-            x="Macro-F1",
-            y="",
-            color="Scoring",
-        )
-        + theme_bw()
-        + theme(figure_size=(11, 6), axis_text_y=element_text(size=9))
-    )
-    save_plot_multi(
-        f1_change_plot,
-        figures_dir=figures_dir,
-        base_name="macro_f1_raw_vs_normalized_by_run",
-        width=11,
-        height=6,
-    )
-
     class_plot_df = class_df[class_df["scoring"] == "normalized"].copy()
     if not include_direct_class:
         class_plot_df = class_plot_df[class_plot_df["behavior_class"].isin(PRIMARY_BEHAVIOR_CLASSES)]
     class_plot_df = apply_run_order(class_plot_df, run_order)
-    class_plot_df["label"] = class_plot_df["recall"].map(lambda x: f"{x:.2f}")
     class_plot_df["behavior_class"] = class_plot_df["behavior_class"].map(CLASS_DISPLAY)
-
-    class_heatmap = (
-        ggplot(class_plot_df, aes(x="behavior_class", y="run_display", fill="recall"))
-        + geom_tile(color="white")
-        + geom_text(aes(label="label"), size=7)
-        + scale_fill_gradient(low="#e8f6f3", high="#0b7285", limits=(0.0, 1.0))
-        + labs(
-            title="Normalized Recall by Class",
-            x="Class",
-            y="",
-            fill="Recall",
+    metric_specs = [
+        ("accuracy", "Per-Class Accuracy (One-vs-Rest)", "per_class_accuracy_heatmap_by_run"),
+        ("precision", "Per-Class Precision", "per_class_precision_heatmap_by_run"),
+        ("recall", "Per-Class Recall", "per_class_recall_heatmap_by_run"),
+        ("f1", "Per-Class F1", "per_class_f1_heatmap_by_run"),
+    ]
+    for metric_col, metric_title, metric_file in metric_specs:
+        metric_df = class_plot_df.copy()
+        metric_df["label"] = metric_df[metric_col].map(lambda x: f"{x:.2f}")
+        metric_plot = (
+            ggplot(metric_df, aes(x="behavior_class", y="run_display", fill=metric_col))
+            + geom_tile(color="white")
+            + geom_text(aes(label="label"), size=7)
+            + scale_fill_gradient(low="#e8f6f3", high="#0b7285", limits=(0.0, 1.0))
+            + labs(
+                title=metric_title,
+                x="Class",
+                y="",
+                fill=metric_col.capitalize(),
+            )
+            + theme_bw()
+            + theme(figure_size=(10, 6), axis_text_y=element_text(size=9))
         )
-        + theme_bw()
-        + theme(figure_size=(10, 6), axis_text_y=element_text(size=9))
-    )
-    save_plot_multi(
-        class_heatmap,
-        figures_dir=figures_dir,
-        base_name="normalized_recall_heatmap_by_class",
-        width=10,
-        height=6,
-    )
+        save_plot_multi(
+            metric_plot,
+            figures_dir=figures_dir,
+            base_name=metric_file,
+            width=10,
+            height=6,
+        )
 
     direct_plot_df = apply_run_order(direct_df, run_order)
     direct_plot_df["label"] = direct_plot_df["direct_prediction_rate"].map(lambda x: f"{x:.1%}")
@@ -796,6 +746,59 @@ def write_summary_markdown(
     summary_path.write_text("\n".join(lines), encoding="utf-8")
 
 
+def latex_escape(text: str) -> str:
+    return (
+        text.replace("\\", "\\textbackslash{}")
+        .replace("_", "\\_")
+        .replace("&", "\\&")
+        .replace("%", "\\%")
+        .replace("#", "\\#")
+        .replace("$", "\\$")
+        .replace("{", "\\{")
+        .replace("}", "\\}")
+    )
+
+
+def write_raw_vs_normalized_latex_table(
+    *,
+    runs_df: pd.DataFrame,
+    output_path: Path,
+) -> None:
+    ordered = runs_df.copy()
+    ordered["delta_accuracy"] = ordered["norm_accuracy"] - ordered["raw_accuracy"]
+    ordered["delta_macro_f1"] = ordered["norm_macro_f1"] - ordered["raw_macro_f1"]
+
+    lines: List[str] = [
+        "% Requires: \\usepackage{booktabs}",
+        "\\begin{table}[t]",
+        "  \\centering",
+        "  \\small",
+        "  \\begin{tabular}{lrrrrrr}",
+        "    \\toprule",
+        "    Run & Raw Acc & Norm Acc & $\\Delta$ Acc & Raw Macro-F1 & Norm Macro-F1 & $\\Delta$ Macro-F1 \\\\",
+        "    \\midrule",
+    ]
+    for _, row in ordered.iterrows():
+        run_name = latex_escape(str(row["run_display"]))
+        lines.append(
+            "    "
+            + f"{run_name} & "
+            + f"{row['raw_accuracy']:.3f} & {row['norm_accuracy']:.3f} & {row['delta_accuracy']:+.3f} & "
+            + f"{row['raw_macro_f1']:.3f} & {row['norm_macro_f1']:.3f} & {row['delta_macro_f1']:+.3f} \\\\"
+        )
+    lines.extend(
+        [
+            "    \\bottomrule",
+            "  \\end{tabular}",
+            "  \\caption{Raw vs. normalized scoring comparison by run.}",
+            "  \\label{tab:raw-vs-normalized-scoring}",
+            "\\end{table}",
+            "",
+        ]
+    )
+    output_path.write_text("\n".join(lines), encoding="utf-8")
+
+
 def main() -> None:
     args = parse_args()
 
@@ -803,6 +806,7 @@ def main() -> None:
     output_dir = ensure_dir(Path(args.output_dir).resolve())
     data_dir = ensure_dir(output_dir / "data")
     figures_dir = ensure_dir(output_dir / "figures")
+    remove_stale_figures(figures_dir)
 
     run_dirs = discover_run_dirs(runs_dir)
     if not run_dirs:
@@ -880,6 +884,10 @@ def main() -> None:
     outcome_df.to_csv(data_dir / "normalization_outcomes.csv", index=False)
     source_df.to_csv(data_dir / "source_level_accuracy.csv", index=False)
     prediction_mix_df.to_csv(data_dir / "prediction_mix.csv", index=False)
+    write_raw_vs_normalized_latex_table(
+        runs_df=runs_df,
+        output_path=output_dir / "raw_vs_normalized_change_table_latex.txt",
+    )
 
     make_summary_charts(
         runs_df=runs_df,

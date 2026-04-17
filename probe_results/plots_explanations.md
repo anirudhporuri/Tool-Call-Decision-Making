@@ -33,38 +33,42 @@ How to read it:
 - Macro-F1 treats classes more evenly than accuracy.
 - If accuracy is high but macro-F1 is much lower, the run is likely biased toward certain classes.
 
-## 3) `accuracy_raw_vs_normalized_by_run`
-
-What it shows:
-- For each run, two points: raw-scored accuracy and normalized-scored accuracy.
-- A connecting segment indicates direction and magnitude of change.
-- X-axis is 0-100%.
-
-How to read it:
-- Rightward move from raw to normalized means normalization helped.
-- Leftward move means normalization hurt.
-- Long segments indicate strong sensitivity to answer-length normalization.
-
-## 4) `macro_f1_raw_vs_normalized_by_run`
-
-What it shows:
-- Same format as #3 but for macro-F1.
-
-How to read it:
-- Useful for seeing whether normalization helps class-balanced behavior, not just top-line accuracy.
-
-## 5) `normalized_recall_heatmap_by_class`
+## 3) `per_class_accuracy_heatmap_by_run`
 
 What it shows:
 - Rows: runs.
-- Columns: behavior classes (`tool_call`, `request_for_info`, `cannot_answer` by default).
-- Cell color + number = normalized recall.
+- Columns: behavior classes.
+- Cell values are one-vs-rest per-class accuracy under normalized scoring.
 
 How to read it:
-- Darker/higher cells are better.
-- A run with one very high column and one very low column is specialized/imbalanced.
+- Higher values are better.
+- Helps identify whether a run distinguishes each class from all others.
 
-## 6) `unsupported_direct_prediction_rate_by_run`
+## 4) `per_class_precision_heatmap_by_run`
+
+What it shows:
+- Per-class precision by run under normalized scoring.
+
+How to read it:
+- High precision for a class means when the model predicts that class, it is usually correct.
+
+## 5) `per_class_recall_heatmap_by_run`
+
+What it shows:
+- Per-class recall by run under normalized scoring.
+
+How to read it:
+- High recall for a class means the model captures most true examples of that class.
+
+## 6) `per_class_f1_heatmap_by_run`
+
+What it shows:
+- Per-class F1 by run under normalized scoring.
+
+How to read it:
+- Balances precision and recall for each class; useful class-level summary signal.
+
+## 7) `unsupported_direct_prediction_rate_by_run`
 
 What it shows:
 - Rate of predictions labeled `direct` under raw and normalized scoring.
@@ -73,7 +77,7 @@ How to read it:
 - Lower is better for this specific test setup, because `direct` has zero gold support here.
 - High `direct` rate means many guaranteed errors.
 
-## 7) `normalization_outcome_breakdown_by_run`
+## 8) `normalization_outcome_breakdown_by_run`
 
 What it shows:
 - Stacked fractions of examples by normalization outcome:
@@ -86,7 +90,7 @@ How to read it:
 - More `fixed` than `broken` is good.
 - If `broken` dominates, normalization is harmful for that run.
 
-## 8) `normalized_accuracy_heatmap_top_sources`
+## 9) `normalized_accuracy_heatmap_top_sources`
 
 What it shows:
 - Rows: runs.
@@ -97,7 +101,7 @@ How to read it:
 - Checks robustness across source types.
 - If a run is strong only on one source and weak on others, it may not generalize well.
 
-## 9) `normalized_prediction_mix_by_run`
+## 10) `normalized_prediction_mix_by_run`
 
 What it shows:
 - Stacked bar per run showing predicted label distribution.
@@ -106,7 +110,7 @@ How to read it:
 - Reveals class bias directly.
 - Useful for diagnosing whether performance issues come from over-predicting one class.
 
-## 10) `*_without_probe` variants
+## 11) `*_without_probe` variants
 
 Files:
 - `normalized_accuracy_by_run_without_probe`
@@ -119,6 +123,23 @@ What they show:
 How to read them:
 - Use these when you want to compare only prompting/fine-tuning runs.
 - In the current set, if no probe runs are present in `Prompting Baselines`, these may look identical to the full versions.
+
+## Raw vs normalized change table (LaTeX)
+
+File:
+- `plot_results/output/raw_vs_normalized_change_table_latex.txt`
+
+What it is:
+- A ready-to-copy LaTeX table (booktabs style) with:
+  - raw accuracy
+  - normalized accuracy
+  - delta accuracy
+  - raw macro-F1
+  - normalized macro-F1
+  - delta macro-F1
+
+Use case:
+- Include this directly in your paper/report instead of plotting the score-change graphs.
 
 ## Practical interpretation checklist
 
