@@ -40,7 +40,21 @@ from plotnine import (
 
 
 FAMILY_ORDER = {"llama": 0, "gemma": 1}
-VARIANT_ORDER = {"0-shot": 0, "4-shot": 1, "SFT": 2, "DPO": 3}
+VARIANT_ORDER = {
+    "0-shot": 0,
+    "4-shot": 1,
+    "SFT": 2,
+    "DPO": 3,
+    "Probe-middle": 4,
+    "Probe-75pct": 5,
+    "Probe-last": 6,
+}
+PROBE_VARIANT_BY_TAG = {
+    "middle": "Probe-middle",
+    "layer_75pct": "Probe-75pct",
+    "75pct": "Probe-75pct",
+    "last": "Probe-last",
+}
 DEFAULT_LABEL_ORDER = ["direct", "tool_call", "request_for_info", "cannot_answer"]
 PRIMARY_BEHAVIOR_CLASSES = ["tool_call", "request_for_info", "cannot_answer"]
 CLASS_DISPLAY = {
@@ -75,12 +89,14 @@ PREDICTION_COLORS = {
 def parse_args() -> argparse.Namespace:
     repo_root = Path(__file__).resolve().parents[1]
     default_runs_dir = repo_root / "Prompting Baselines"
+    default_probe_runs_dir = repo_root / "Probe Baselines" / "outputs"
     default_output_dir = Path(__file__).resolve().parent / "output"
     parser = argparse.ArgumentParser(
-        description="Analyze prompting baseline results and generate ggplot charts + summary tables.",
+        description="Analyze prompting + probe baseline results and generate ggplot charts + summary tables.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument("--runs-dir", default=str(default_runs_dir))
+    parser.add_argument("--probe-runs-dir", default=str(default_probe_runs_dir))
     parser.add_argument("--output-dir", default=str(default_output_dir))
     parser.add_argument("--top-sources", type=int, default=8)
     parser.add_argument("--min-source-examples", type=int, default=100)
@@ -123,6 +139,20 @@ def discover_run_dirs(runs_dir: Path) -> List[Path]:
     return sorted(run_dirs)
 
 
+def discover_probe_dirs(probe_runs_dir: Path) -> List[Path]:
+    required = {"probe_evaluation_summary.json", "run_config.json"}
+    if not probe_runs_dir.exists():
+        return []
+    run_dirs: List[Path] = []
+    for child in probe_runs_dir.iterdir():
+        if not child.is_dir():
+            continue
+        child_files = {p.name for p in child.iterdir() if p.is_file()}
+        if required.issubset(child_files):
+            run_dirs.append(child)
+    return sorted(run_dirs)
+
+
 def infer_model_family(run_key: str, run_config: Dict[str, Any]) -> str:
     family = str(run_config.get("model_family", "")).lower().strip()
     model_name = str(run_config.get("model_name_or_path", "")).lower()
@@ -154,6 +184,45 @@ def infer_variant_label(run_key: str, run_config: Dict[str, Any]) -> str:
     return f"{num_shots}-shot"
 
 
+def infer_probe_variant_label(layer_tag: str) -> str:
+    key = str(layer_tag).strip().lower()
+    if key in PROBE_VARIANT_BY_TAG:
+        return PROBE_VARIANT_BY_TAG[key]
+    if "75" in key:
+        return "Probe-75pct"
+    if "mid" in key:
+        return "Probe-middle"
+    if "last" in key:
+        return "Probe-last"
+    return f"Probe-{layer_tag}"
+
+
+def build_probe_summary_like(layer_metrics: Dict[str, Any], n_examples: int) -> Dict[str, Any]:
+    labels = list(layer_metrics.get("confusion_matrix_labels") or [])
+    confusion_matrix = layer_metrics.get("confusion_matrix") or []
+    class_report = layer_metrics.get("classification_report") or {}
+    accuracy = float(layer_metrics.get("accuracy", class_report.get("accuracy", 0.0)) or 0.0)
+    macro_f1 = float(
+        layer_metrics.get(
+            "macro_f1",
+            (class_report.get("macro avg", {}) or {}).get("f1-score", 0.0),
+        )
+        or 0.0
+    )
+    scoring_payload = {
+        "accuracy": accuracy,
+        "macro_f1": macro_f1,
+        "classification_report": class_report,
+        "confusion_matrix": confusion_matrix,
+    }
+    return {
+        "label_order": labels,
+        "raw": scoring_payload,
+        "normalized": scoring_payload,
+        "n_examples": int(n_examples),
+    }
+
+
 def family_display_names(model_family: str) -> Tuple[str, str]:
     if model_family == "llama":
         return "Llama 3.2 3B", "Llama"
@@ -169,6 +238,7 @@ def extract_class_metrics(
     model_family: str,
     variant_label: str,
     summary: Dict[str, Any],
+    is_probe: bool = False,
 ) -> List[Dict[str, Any]]:
     label_order = list(summary.get("label_order") or DEFAULT_LABEL_ORDER)
     records: List[Dict[str, Any]] = []
@@ -196,6 +266,7 @@ def extract_class_metrics(
                     "run_display": run_display,
                     "model_family": model_family,
                     "variant_label": variant_label,
+                    "is_probe": bool(is_probe),
                     "scoring": scoring,
                     "behavior_class": label,
                     "accuracy": one_vs_rest_accuracy,
@@ -228,6 +299,7 @@ def extract_sample_level_summaries(
     variant_label: str,
     samples: List[Dict[str, Any]],
     label_order: Iterable[str],
+    is_probe: bool = False,
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
     if not samples:
         return [], [], [], []
@@ -246,6 +318,7 @@ def extract_sample_level_summaries(
                 "run_display": run_display,
                 "model_family": model_family,
                 "variant_label": variant_label,
+                "is_probe": bool(is_probe),
                 "scoring": scoring,
                 "n_examples": n_examples,
                 "direct_predictions": direct_predictions,
@@ -264,6 +337,7 @@ def extract_sample_level_summaries(
                     "run_display": run_display,
                     "model_family": model_family,
                     "variant_label": variant_label,
+                    "is_probe": bool(is_probe),
                     "scoring": scoring,
                     "label": label,
                     "fraction": counts.get(label, 0) / max(n_examples, 1),
@@ -295,6 +369,7 @@ def extract_sample_level_summaries(
                 "run_display": run_display,
                 "model_family": model_family,
                 "variant_label": variant_label,
+                "is_probe": bool(is_probe),
                 "outcome": outcome_name,
                 "count": count,
                 "fraction": count / max(n_examples, 1),
@@ -309,6 +384,7 @@ def extract_sample_level_summaries(
                 "run_display": run_display,
                 "model_family": model_family,
                 "variant_label": variant_label,
+                "is_probe": bool(is_probe),
                 "source": source,
                 "n_examples": n_source,
                 "raw_accuracy": stats["raw_correct"] / max(n_source, 1),
@@ -352,7 +428,6 @@ def save_plot_multi(
     width: float,
     height: float,
 ) -> None:
-    save_plot(plot_obj, figures_dir / f"{base_name}.png", width=width, height=height)
     # PDF output keeps vector geometry for report-quality scaling.
     save_plot(plot_obj, figures_dir / f"{base_name}.pdf", width=width, height=height)
 
@@ -364,10 +439,15 @@ def remove_stale_figures(figures_dir: Path) -> None:
         "normalized_recall_heatmap_by_class",
     ]
     for base in stale_basenames:
-        for ext in ("png", "pdf"):
+        for ext in ("pdf",):
             path = figures_dir / f"{base}.{ext}"
             if path.exists():
                 path.unlink()
+
+
+def remove_legacy_png_outputs(figures_dir: Path) -> None:
+    for png_path in figures_dir.glob("*.png"):
+        png_path.unlink()
 
 
 def make_summary_charts(
@@ -385,25 +465,28 @@ def make_summary_charts(
 ) -> None:
     run_order = runs_df["run_display"].tolist()
     runs_plot = apply_run_order(runs_df, run_order)
-    runs_plot["is_probe"] = runs_plot["variant_label"].str.contains("probe", case=False, na=False) | runs_plot[
-        "run_key"
-    ].str.contains("probe", case=False, na=False)
+    if "is_probe" in runs_plot.columns:
+        runs_plot["is_probe"] = runs_plot["is_probe"].fillna(False).astype(bool)
+    else:
+        runs_plot["is_probe"] = runs_plot["variant_label"].str.contains("probe", case=False, na=False) | runs_plot[
+            "run_key"
+        ].str.contains("probe", case=False, na=False)
 
     runs_plot["model_family"] = runs_plot["model_family"].astype(str)
-    runs_plot["norm_accuracy_label"] = runs_plot["norm_accuracy"].map(lambda x: f"{x:.3f}")
-    runs_plot["norm_macro_f1_label"] = runs_plot["norm_macro_f1"].map(lambda x: f"{x:.3f}")
-    runs_plot["norm_accuracy_label_pos"] = (runs_plot["norm_accuracy"] + 0.012).clip(upper=0.985)
-    runs_plot["norm_macro_f1_label_pos"] = (runs_plot["norm_macro_f1"] + 0.012).clip(upper=0.985)
+    runs_plot["norm_accuracy_label"] = runs_plot["norm_accuracy"].map(lambda x: f"{x:.1%}")
+    runs_plot["norm_macro_f1_label"] = runs_plot["norm_macro_f1"].map(lambda x: f"{x:.1%}")
+    runs_plot["norm_accuracy_label_pos"] = runs_plot["norm_accuracy"] + 0.03
+    runs_plot["norm_macro_f1_label_pos"] = runs_plot["norm_macro_f1"] + 0.03
 
     accuracy_plot = (
         ggplot(runs_plot, aes(x="run_display", y="norm_accuracy", fill="model_family"))
         + geom_col(width=0.72)
-        + geom_text(aes(y="norm_accuracy_label_pos", label="norm_accuracy_label"), size=10, ha="left")
+        + geom_text(aes(y="norm_accuracy_label_pos", label="norm_accuracy_label"), size=11, ha="left")
         + coord_flip()
         + scale_fill_manual(values=FAMILY_COLORS)
         + scale_y_continuous(
             labels=percent_format(),
-            limits=(0.0, 1.0),
+            limits=(0.0, 1.08),
             breaks=[0.0, 0.2, 0.4, 0.6, 0.8, 1.0],
         )
         + labs(
@@ -426,12 +509,12 @@ def make_summary_charts(
     macrof1_plot = (
         ggplot(runs_plot, aes(x="run_display", y="norm_macro_f1", fill="model_family"))
         + geom_col(width=0.72)
-        + geom_text(aes(y="norm_macro_f1_label_pos", label="norm_macro_f1_label"), size=10, ha="left")
+        + geom_text(aes(y="norm_macro_f1_label_pos", label="norm_macro_f1_label"), size=11, ha="left")
         + coord_flip()
         + scale_fill_manual(values=FAMILY_COLORS)
         + scale_y_continuous(
             labels=percent_format(),
-            limits=(0.0, 1.0),
+            limits=(0.0, 1.08),
             breaks=[0.0, 0.2, 0.4, 0.6, 0.8, 1.0],
         )
         + labs(
@@ -539,45 +622,6 @@ def make_summary_charts(
         height=6,
     )
 
-    source_plot_df = source_df[source_df["n_examples"] >= min_source_examples].copy()
-    if not source_plot_df.empty:
-        top_source_list = (
-            source_plot_df.groupby("source", as_index=False)["n_examples"]
-            .mean()
-            .sort_values("n_examples", ascending=False)
-            .head(top_sources)["source"]
-            .tolist()
-        )
-        source_plot_df = source_plot_df[source_plot_df["source"].isin(top_source_list)].copy()
-        source_plot_df = apply_run_order(source_plot_df, run_order)
-        source_plot_df["source"] = pd.Categorical(source_plot_df["source"], categories=top_source_list, ordered=True)
-        source_plot_df["label"] = source_plot_df["normalized_accuracy"].map(lambda x: f"{x:.2f}")
-
-        source_heatmap = (
-            ggplot(source_plot_df, aes(x="source", y="run_display", fill="normalized_accuracy"))
-            + geom_tile(color="white")
-            + geom_text(aes(label="label"), size=6)
-            + labs(
-                title="Top Sources: Normalized Accuracy by Run",
-                x="Source",
-                y="",
-                fill="Norm Accuracy",
-            )
-            + theme_bw()
-            + theme(
-                figure_size=(12, 7),
-                axis_text_x=element_text(rotation=30, ha="right"),
-                axis_text_y=element_text(size=9),
-            )
-        )
-        save_plot_multi(
-            source_heatmap,
-            figures_dir=figures_dir,
-            base_name="normalized_accuracy_heatmap_top_sources",
-            width=12,
-            height=7,
-        )
-
     pred_mix_plot_df = prediction_mix_df[prediction_mix_df["scoring"] == "normalized"].copy()
     pred_mix_plot_df = apply_run_order(pred_mix_plot_df, run_order)
     pred_mix_plot = (
@@ -607,17 +651,17 @@ def make_summary_charts(
     no_probe_runs = runs_plot[~runs_plot["is_probe"]].copy()
     if not no_probe_runs.empty:
         no_probe_order = no_probe_runs["run_display"].tolist()
-        no_probe_runs["norm_accuracy_label_pos"] = (no_probe_runs["norm_accuracy"] + 0.012).clip(upper=0.985)
-        no_probe_runs["norm_macro_f1_label_pos"] = (no_probe_runs["norm_macro_f1"] + 0.012).clip(upper=0.985)
+        no_probe_runs["norm_accuracy_label_pos"] = no_probe_runs["norm_accuracy"] + 0.03
+        no_probe_runs["norm_macro_f1_label_pos"] = no_probe_runs["norm_macro_f1"] + 0.03
         no_probe_acc_plot = (
             ggplot(no_probe_runs, aes(x="run_display", y="norm_accuracy", fill="model_family"))
             + geom_col(width=0.72)
-            + geom_text(aes(y="norm_accuracy_label_pos", label="norm_accuracy_label"), size=10, ha="left")
+            + geom_text(aes(y="norm_accuracy_label_pos", label="norm_accuracy_label"), size=11, ha="left")
             + coord_flip()
             + scale_fill_manual(values=FAMILY_COLORS)
             + scale_y_continuous(
                 labels=percent_format(),
-                limits=(0.0, 1.0),
+                limits=(0.0, 1.08),
                 breaks=[0.0, 0.2, 0.4, 0.6, 0.8, 1.0],
             )
             + labs(
@@ -640,12 +684,12 @@ def make_summary_charts(
         no_probe_f1_plot = (
             ggplot(no_probe_runs, aes(x="run_display", y="norm_macro_f1", fill="model_family"))
             + geom_col(width=0.72)
-            + geom_text(aes(y="norm_macro_f1_label_pos", label="norm_macro_f1_label"), size=10, ha="left")
+            + geom_text(aes(y="norm_macro_f1_label_pos", label="norm_macro_f1_label"), size=11, ha="left")
             + coord_flip()
             + scale_fill_manual(values=FAMILY_COLORS)
             + scale_y_continuous(
                 labels=percent_format(),
-                limits=(0.0, 1.0),
+                limits=(0.0, 1.08),
                 breaks=[0.0, 0.2, 0.4, 0.6, 0.8, 1.0],
             )
             + labs(
@@ -666,12 +710,15 @@ def make_summary_charts(
         )
 
         no_probe_mix_df = prediction_mix_df[prediction_mix_df["scoring"] == "normalized"].copy()
-        no_probe_mix_df = no_probe_mix_df[
-            ~(
-                no_probe_mix_df["variant_label"].str.contains("probe", case=False, na=False)
-                | no_probe_mix_df["run_key"].str.contains("probe", case=False, na=False)
-            )
-        ].copy()
+        if "is_probe" in no_probe_mix_df.columns:
+            no_probe_mix_df = no_probe_mix_df[~no_probe_mix_df["is_probe"].fillna(False)].copy()
+        else:
+            no_probe_mix_df = no_probe_mix_df[
+                ~(
+                    no_probe_mix_df["variant_label"].str.contains("probe", case=False, na=False)
+                    | no_probe_mix_df["run_key"].str.contains("probe", case=False, na=False)
+                )
+            ].copy()
         no_probe_mix_df = apply_run_order(no_probe_mix_df, no_probe_order)
         no_probe_mix_plot = (
             ggplot(no_probe_mix_df, aes(x="run_display", y="fraction", fill="label"))
@@ -706,8 +753,13 @@ def write_summary_markdown(
 ) -> None:
     best_norm_acc = runs_df.loc[runs_df["norm_accuracy"].idxmax()]
     best_norm_f1 = runs_df.loc[runs_df["norm_macro_f1"].idxmax()]
-    biggest_acc_gain = runs_df.loc[(runs_df["norm_accuracy"] - runs_df["raw_accuracy"]).idxmax()]
-    biggest_f1_gain = runs_df.loc[(runs_df["norm_macro_f1"] - runs_df["raw_macro_f1"]).idxmax()]
+    gain_df = runs_df.copy()
+    if "is_probe" in gain_df.columns:
+        non_probe = gain_df[~gain_df["is_probe"].fillna(False)].copy()
+        if not non_probe.empty:
+            gain_df = non_probe
+    biggest_acc_gain = gain_df.loc[(gain_df["norm_accuracy"] - gain_df["raw_accuracy"]).idxmax()]
+    biggest_f1_gain = gain_df.loc[(gain_df["norm_macro_f1"] - gain_df["raw_macro_f1"]).idxmax()]
     highest_direct_norm = direct_df[direct_df["scoring"] == "normalized"].sort_values(
         "direct_prediction_rate", ascending=False
     ).iloc[0]
@@ -765,6 +817,10 @@ def write_raw_vs_normalized_latex_table(
     output_path: Path,
 ) -> None:
     ordered = runs_df.copy()
+    if "is_probe" in ordered.columns:
+        non_probe = ordered[~ordered["is_probe"].fillna(False)].copy()
+        if not non_probe.empty:
+            ordered = non_probe
     ordered["delta_accuracy"] = ordered["norm_accuracy"] - ordered["raw_accuracy"]
     ordered["delta_macro_f1"] = ordered["norm_macro_f1"] - ordered["raw_macro_f1"]
 
@@ -803,16 +859,19 @@ def main() -> None:
     args = parse_args()
 
     runs_dir = Path(args.runs_dir).resolve()
+    probe_runs_dir = Path(args.probe_runs_dir).resolve()
     output_dir = ensure_dir(Path(args.output_dir).resolve())
     data_dir = ensure_dir(output_dir / "data")
     figures_dir = ensure_dir(output_dir / "figures")
     remove_stale_figures(figures_dir)
+    remove_legacy_png_outputs(figures_dir)
 
     run_dirs = discover_run_dirs(runs_dir)
     if not run_dirs:
         raise FileNotFoundError(
             f"No run directories found under {runs_dir} with summary.json + run_config.json."
         )
+    probe_dirs = discover_probe_dirs(probe_runs_dir)
 
     run_records: List[Dict[str, Any]] = []
     class_records: List[Dict[str, Any]] = []
@@ -837,6 +896,7 @@ def main() -> None:
                 "run_display": run_display,
                 "model_family": model_family,
                 "variant_label": variant_label,
+                "is_probe": False,
                 "raw_accuracy": float(summary["raw"]["accuracy"]),
                 "norm_accuracy": float(summary["normalized"]["accuracy"]),
                 "raw_macro_f1": float(summary["raw"]["macro_f1"]),
@@ -851,6 +911,7 @@ def main() -> None:
                 model_family=model_family,
                 variant_label=variant_label,
                 summary=summary,
+                is_probe=False,
             )
         )
 
@@ -865,11 +926,102 @@ def main() -> None:
                 variant_label=variant_label,
                 samples=samples,
                 label_order=label_order,
+                is_probe=False,
             )
             direct_records.extend(direct_rows)
             outcome_records.extend(outcome_rows)
             source_records.extend(source_rows)
             prediction_mix_records.extend(pred_mix_rows)
+
+    for probe_dir in probe_dirs:
+        probe_eval = load_json(probe_dir / "probe_evaluation_summary.json")
+        run_config = load_json(probe_dir / "run_config.json")
+        model_family = infer_model_family(probe_dir.name, run_config)
+        _, family_short = family_display_names(model_family)
+
+        layers: Dict[str, Dict[str, Any]] = probe_eval.get("layers") or {}
+        layer_order = [
+            str(spec.get("tag"))
+            for spec in (probe_eval.get("layer_specs") or [])
+            if str(spec.get("tag") or "").strip()
+        ]
+        if not layer_order:
+            layer_order = sorted(layers.keys())
+
+        probe_samples_path = probe_dir / "probe_comparison_samples.jsonl"
+        probe_samples = read_jsonl(probe_samples_path) if probe_samples_path.exists() else []
+
+        for layer_tag in layer_order:
+            layer_payload = layers.get(layer_tag) or {}
+            probe_vs_gold = layer_payload.get("probe_vs_gold") or {}
+            if not probe_vs_gold:
+                continue
+
+            variant_label = infer_probe_variant_label(layer_tag)
+            run_key = f"{probe_dir.name}:{layer_tag}"
+            run_display = f"{family_short} {variant_label} ({run_key})"
+            n_examples = int(probe_eval.get("num_joined_examples", 0) or 0)
+            probe_accuracy = float(probe_vs_gold.get("accuracy", 0.0) or 0.0)
+            probe_macro_f1 = float(
+                probe_vs_gold.get(
+                    "macro_f1",
+                    (probe_vs_gold.get("classification_report", {}) or {}).get("macro avg", {}).get("f1-score", 0.0),
+                )
+                or 0.0
+            )
+            run_records.append(
+                {
+                    "run_key": run_key,
+                    "run_display": run_display,
+                    "model_family": model_family,
+                    "variant_label": variant_label,
+                    "is_probe": True,
+                    "raw_accuracy": probe_accuracy,
+                    "norm_accuracy": probe_accuracy,
+                    "raw_macro_f1": probe_macro_f1,
+                    "norm_macro_f1": probe_macro_f1,
+                    "n_examples": n_examples,
+                }
+            )
+
+            summary_like = build_probe_summary_like(probe_vs_gold, n_examples)
+            class_records.extend(
+                extract_class_metrics(
+                    run_key=run_key,
+                    run_display=run_display,
+                    model_family=model_family,
+                    variant_label=variant_label,
+                    summary=summary_like,
+                    is_probe=True,
+                )
+            )
+
+            if probe_samples:
+                layer_samples: List[Dict[str, Any]] = []
+                for sample in probe_samples:
+                    probe_pred = (sample.get("probe_preds") or {}).get(layer_tag)
+                    if probe_pred is None:
+                        continue
+                    layer_samples.append(
+                        {
+                            "gold": sample.get("gold"),
+                            "pred_raw": probe_pred,
+                            "pred_norm": probe_pred,
+                            "source": sample.get("source"),
+                        }
+                    )
+                if layer_samples:
+                    label_order = summary_like.get("label_order") or DEFAULT_LABEL_ORDER
+                    _, _, _, pred_mix_rows = extract_sample_level_summaries(
+                        run_key=run_key,
+                        run_display=run_display,
+                        model_family=model_family,
+                        variant_label=variant_label,
+                        samples=layer_samples,
+                        label_order=label_order,
+                        is_probe=True,
+                    )
+                    prediction_mix_records.extend(pred_mix_rows)
 
     runs_df = sort_runs(pd.DataFrame(run_records))
     class_df = sort_runs(pd.DataFrame(class_records))
