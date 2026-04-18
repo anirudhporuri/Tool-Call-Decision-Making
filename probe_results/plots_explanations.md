@@ -23,6 +23,8 @@ Interpretation:
 
 For probe-layer runs, there is no separate raw-vs-normalized decoding step for the probe classifier, so probe rows are included in plots as decision-quality comparisons, but raw-vs-normalized delta analysis is kept focused on non-probe runs.
 
+`75pct` means the probe at roughly 75% model depth (an intermediate hidden layer between middle and last), not 75% of the data.
+
 ## 1) `normalized_accuracy_by_run`
 
 What it shows:
@@ -41,15 +43,14 @@ What it shows:
 How to read it:
 - Macro-F1 balances class performance more evenly than accuracy.
 
-## 3) `per_class_accuracy_heatmap_by_run`
+## 3) `per_class_accuracy_bar_by_run`
 
 What it shows:
-- Rows: runs.
-- Columns: behavior classes.
-- Cells: one-vs-rest per-class accuracy.
+- Grouped bars by run.
+- One bar per class (`tool_call`, `request_for_info`, `cannot_answer`) within each run.
 
 How to read it:
-- Higher values mean better separation for that class.
+- Higher bar means better one-vs-rest class separation for that run/class pair.
 
 ## 4) `per_class_precision_heatmap_by_run`
 

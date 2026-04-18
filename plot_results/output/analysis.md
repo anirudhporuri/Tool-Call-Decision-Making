@@ -1,6 +1,6 @@
 # Full Analysis of Prompting + Probe Results
 
-_Generated: 2026-04-17 19:49:56_
+_Generated: 2026-04-17 20:37:47_
 
 ## What Normalization Means
 
@@ -10,8 +10,8 @@ _Generated: 2026-04-17 19:49:56_
 
 ## What `75pct` Means
 
-- `Probe (75% Depth Layer)` means the probe reads hidden states from roughly 75% through the transformer depth.
-- It is an intermediate representation between the middle layer and the final layer (`Probe (Last Layer)`).
+- `75pct` means the probe reads hidden states from roughly 75% through the transformer depth.
+- It is an intermediate representation between the middle layer and the final layer.
 
 ## Top Runs by Normalized Accuracy
 
@@ -20,20 +20,20 @@ _Generated: 2026-04-17 19:49:56_
 | 1 | Llama SFT | Prompting | 79.9% | 59.0% |
 | 2 | Llama 4-shot | Prompting | 59.0% | 43.2% |
 | 3 | Llama DPO | Prompting | 58.5% | 41.8% |
-| 4 | Llama Probe (Middle Layer) | Probe | 54.7% | 55.0% |
-| 5 | Llama Probe (75% Depth Layer) | Probe | 52.1% | 52.7% |
-| 6 | Gemma Probe (75% Depth Layer) | Probe | 48.7% | 48.3% |
+| 4 | Llama Probe Zero-shot (Middle layer) | Probe | 54.7% | 55.0% |
+| 5 | Llama Probe Zero-shot (75% depth layer) | Probe | 52.1% | 52.7% |
+| 6 | Gemma Probe Zero-shot (75% depth layer) | Probe | 48.7% | 48.3% |
 
 ## Top Runs by Normalized Macro-F1
 
 | Rank | Run | Type | Norm Macro-F1 | Norm Acc |
 |---|---|---|---:|---:|
 | 1 | Llama SFT | Prompting | 59.0% | 79.9% |
-| 2 | Llama Probe (Middle Layer) | Probe | 55.0% | 54.7% |
-| 3 | Llama Probe (75% Depth Layer) | Probe | 52.7% | 52.1% |
-| 4 | Gemma Probe (Middle Layer) | Probe | 48.3% | 48.6% |
-| 5 | Gemma Probe (75% Depth Layer) | Probe | 48.3% | 48.7% |
-| 6 | Llama Probe (Last Layer) | Probe | 46.4% | 48.4% |
+| 2 | Llama Probe Zero-shot (Middle layer) | Probe | 55.0% | 54.7% |
+| 3 | Llama Probe Zero-shot (75% depth layer) | Probe | 52.7% | 52.1% |
+| 4 | Gemma Probe Zero-shot (Middle layer) | Probe | 48.3% | 48.6% |
+| 5 | Gemma Probe Zero-shot (75% depth layer) | Probe | 48.3% | 48.7% |
+| 6 | Llama Probe Zero-shot (Last layer) | Probe | 46.4% | 48.4% |
 
 ## Normalization Impact (Prompting Runs Only)
 
@@ -47,12 +47,12 @@ _Generated: 2026-04-17 19:49:56_
 
 | Run | Norm Acc | Norm Macro-F1 |
 |---|---:|---:|
-| Gemma Probe (Middle Layer) | 48.6% | 48.3% |
-| Gemma Probe (75% Depth Layer) | 48.7% | 48.3% |
-| Gemma Probe (Last Layer) | 46.2% | 45.6% |
-| Llama Probe (Middle Layer) | 54.7% | 55.0% |
-| Llama Probe (75% Depth Layer) | 52.1% | 52.7% |
-| Llama Probe (Last Layer) | 48.4% | 46.4% |
+| Gemma Probe Zero-shot (Middle layer) | 48.6% | 48.3% |
+| Gemma Probe Zero-shot (75% depth layer) | 48.7% | 48.3% |
+| Gemma Probe Zero-shot (Last layer) | 46.2% | 45.6% |
+| Llama Probe Zero-shot (Middle layer) | 54.7% | 55.0% |
+| Llama Probe Zero-shot (75% depth layer) | 52.1% | 52.7% |
+| Llama Probe Zero-shot (Last layer) | 48.4% | 46.4% |
 
 ## Class-Level Pattern (Normalized)
 
@@ -79,5 +79,5 @@ _Generated: 2026-04-17 19:49:56_
 ## Bottom Line
 
 - Probe-layer runs are now included directly in the same comparison framework as prompting runs.
-- `Probe (75% Depth Layer)` is the probe at roughly three-quarters of transformer depth, not a dataset percentage.
+- `75pct` means the probe at roughly three-quarters of transformer depth, not a dataset percentage.
 - Use the `_without_probe` plots for apples-to-apples prompting-only comparisons.

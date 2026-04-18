@@ -46,16 +46,17 @@ VARIANT_ORDER = {
     "4-shot": 1,
     "SFT": 2,
     "DPO": 3,
-    "Probe (Middle Layer)": 4,
-    "Probe (75% Depth Layer)": 5,
-    "Probe (Last Layer)": 6,
+    "Middle layer": 4,
+    "75% depth layer": 5,
+    "Last layer": 6,
 }
-PROBE_VARIANT_BY_TAG = {
-    "middle": "Probe (Middle Layer)",
-    "layer_75pct": "Probe (75% Depth Layer)",
-    "75pct": "Probe (75% Depth Layer)",
-    "last": "Probe (Last Layer)",
+PROBE_LAYER_DISPLAY_BY_TAG = {
+    "middle": "Middle layer",
+    "layer_75pct": "75% depth layer",
+    "75pct": "75% depth layer",
+    "last": "Last layer",
 }
+PROBE_SETTING_ORDER = {"n/a": -1, "Zero-shot": 0, "4-shot": 1, "Unknown": 2}
 DEFAULT_LABEL_ORDER = ["direct", "tool_call", "request_for_info", "cannot_answer"]
 PRIMARY_BEHAVIOR_CLASSES = ["tool_call", "request_for_info", "cannot_answer"]
 CLASS_DISPLAY = {
@@ -187,15 +188,31 @@ def infer_variant_label(run_key: str, run_config: Dict[str, Any]) -> str:
 
 def infer_probe_variant_label(layer_tag: str) -> str:
     key = str(layer_tag).strip().lower()
-    if key in PROBE_VARIANT_BY_TAG:
-        return PROBE_VARIANT_BY_TAG[key]
+    if key in PROBE_LAYER_DISPLAY_BY_TAG:
+        return PROBE_LAYER_DISPLAY_BY_TAG[key]
     if "75" in key:
-        return "Probe (75% Depth Layer)"
+        return "75% depth layer"
     if "mid" in key:
-        return "Probe (Middle Layer)"
+        return "Middle layer"
     if "last" in key:
-        return "Probe (Last Layer)"
-    return f"Probe-{layer_tag}"
+        return "Last layer"
+    return str(layer_tag)
+
+
+def infer_probe_eval_setting(run_key: str, run_config: Dict[str, Any]) -> str:
+    eval_path = str(run_config.get("eval_samples_jsonl", "")).lower()
+    haystack = " ".join(
+        [
+            run_key.lower(),
+            eval_path,
+            str(run_config.get("output_dir", "")).lower(),
+        ]
+    )
+    if "4shot" in haystack or "4-shot" in haystack:
+        return "4-shot"
+    if "zeroshot" in haystack or "zero-shot" in haystack or "probe_base" in haystack:
+        return "Zero-shot"
+    return "Unknown"
 
 
 def build_probe_summary_like(layer_metrics: Dict[str, Any], n_examples: int) -> Dict[str, Any]:
@@ -234,6 +251,12 @@ def family_display_names(model_family: str) -> Tuple[str, str]:
 
 def make_run_display(family_short: str, variant_label: str) -> str:
     return f"{family_short} {variant_label}"
+
+
+def make_probe_run_display(family_short: str, probe_eval_setting: str, layer_label: str) -> str:
+    if probe_eval_setting and probe_eval_setting != "Unknown":
+        return f"{family_short} Probe {probe_eval_setting} ({layer_label})"
+    return f"{family_short} Probe ({layer_label})"
 
 
 def extract_class_metrics(
@@ -404,7 +427,11 @@ def sort_runs(df: pd.DataFrame) -> pd.DataFrame:
     frame = df.copy()
     frame["family_rank"] = frame["model_family"].map(FAMILY_ORDER).fillna(99).astype(int)
     frame["variant_rank"] = frame["variant_label"].map(VARIANT_ORDER).fillna(99).astype(int)
-    frame = frame.sort_values(["family_rank", "variant_rank", "run_key"]).reset_index(drop=True)
+    if "probe_eval_setting" in frame.columns:
+        frame["probe_setting_rank"] = frame["probe_eval_setting"].map(PROBE_SETTING_ORDER).fillna(99).astype(int)
+    else:
+        frame["probe_setting_rank"] = 99
+    frame = frame.sort_values(["family_rank", "probe_setting_rank", "variant_rank", "run_key"]).reset_index(drop=True)
     return frame
 
 
@@ -442,6 +469,7 @@ def remove_stale_figures(figures_dir: Path) -> None:
         "accuracy_raw_vs_normalized_by_run",
         "macro_f1_raw_vs_normalized_by_run",
         "normalized_recall_heatmap_by_class",
+        "per_class_accuracy_heatmap_by_run",
     ]
     for base in stale_basenames:
         for ext in ("pdf",):
@@ -544,8 +572,30 @@ def make_summary_charts(
         class_plot_df = class_plot_df[class_plot_df["behavior_class"].isin(PRIMARY_BEHAVIOR_CLASSES)]
     class_plot_df = apply_run_order(class_plot_df, run_order)
     class_plot_df["behavior_class"] = class_plot_df["behavior_class"].map(CLASS_DISPLAY)
+    class_accuracy_bar = (
+        ggplot(class_plot_df, aes(x="run_display", y="accuracy", fill="behavior_class"))
+        + geom_col(position=position_dodge(width=0.78), width=0.7)
+        + coord_flip()
+        + scale_fill_manual(values=PREDICTION_COLORS)
+        + scale_y_continuous(labels=percent_format(), limits=(0.0, 1.0), breaks=[0.0, 0.2, 0.4, 0.6, 0.8, 1.0])
+        + labs(
+            title="Per-Class Accuracy by Run",
+            x="",
+            y="Accuracy (One-vs-Rest)",
+            fill="Class",
+        )
+        + theme_bw()
+        + theme(figure_size=(12, 7), axis_text_y=element_text(size=9))
+    )
+    save_plot_multi(
+        class_accuracy_bar,
+        figures_dir=figures_dir,
+        base_name="per_class_accuracy_bar_by_run",
+        width=12,
+        height=7,
+    )
+
     metric_specs = [
-        ("accuracy", "Per-Class Accuracy (One-vs-Rest)", "per_class_accuracy_heatmap_by_run"),
         ("precision", "Per-Class Precision", "per_class_precision_heatmap_by_run"),
         ("recall", "Per-Class Recall", "per_class_recall_heatmap_by_run"),
         ("f1", "Per-Class F1", "per_class_f1_heatmap_by_run"),
@@ -840,8 +890,8 @@ def write_full_analysis_markdown(
         "",
         "## What `75pct` Means",
         "",
-        "- `Probe (75% Depth Layer)` means the probe reads hidden states from roughly 75% through the transformer depth.",
-        "- It is an intermediate representation between the middle layer and the final layer (`Probe (Last Layer)`).",
+        "- `75pct` means the probe reads hidden states from roughly 75% through the transformer depth.",
+        "- It is an intermediate representation between the middle layer and the final layer.",
         "",
         "## Top Runs by Normalized Accuracy",
         "",
@@ -887,7 +937,10 @@ def write_full_analysis_markdown(
         )
 
     if not probe_only.empty:
-        probe_table = probe_only.sort_values(["model_family", "variant_rank", "run_key"])
+        sort_cols = ["model_family", "variant_rank", "run_key"]
+        if "probe_setting_rank" in probe_only.columns:
+            sort_cols = ["model_family", "probe_setting_rank", "variant_rank", "run_key"]
+        probe_table = probe_only.sort_values(sort_cols)
         lines.extend(
             [
                 "",
@@ -971,7 +1024,7 @@ def write_full_analysis_markdown(
             "## Bottom Line",
             "",
             "- Probe-layer runs are now included directly in the same comparison framework as prompting runs.",
-            "- `Probe (75% Depth Layer)` is the probe at roughly three-quarters of transformer depth, not a dataset percentage.",
+            "- `75pct` means the probe at roughly three-quarters of transformer depth, not a dataset percentage.",
             "- Use the `_without_probe` plots for apples-to-apples prompting-only comparisons.",
         ]
     )
@@ -1078,6 +1131,7 @@ def main() -> None:
                 "model_family": model_family,
                 "variant_label": variant_label,
                 "is_probe": False,
+                "probe_eval_setting": "n/a",
                 "raw_accuracy": float(summary["raw"]["accuracy"]),
                 "norm_accuracy": float(summary["normalized"]["accuracy"]),
                 "raw_macro_f1": float(summary["raw"]["macro_f1"]),
@@ -1118,6 +1172,7 @@ def main() -> None:
         probe_eval = load_json(probe_dir / "probe_evaluation_summary.json")
         run_config = load_json(probe_dir / "run_config.json")
         model_family = infer_model_family(probe_dir.name, run_config)
+        probe_eval_setting = infer_probe_eval_setting(probe_dir.name, run_config)
         _, family_short = family_display_names(model_family)
 
         layers: Dict[str, Dict[str, Any]] = probe_eval.get("layers") or {}
@@ -1140,7 +1195,7 @@ def main() -> None:
 
             variant_label = infer_probe_variant_label(layer_tag)
             run_key = f"{probe_dir.name}:{layer_tag}"
-            run_display = make_run_display(family_short, variant_label)
+            run_display = make_probe_run_display(family_short, probe_eval_setting, variant_label)
             n_examples = int(probe_eval.get("num_joined_examples", 0) or 0)
             probe_accuracy = float(probe_vs_gold.get("accuracy", 0.0) or 0.0)
             probe_macro_f1 = float(
@@ -1157,6 +1212,7 @@ def main() -> None:
                     "model_family": model_family,
                     "variant_label": variant_label,
                     "is_probe": True,
+                    "probe_eval_setting": probe_eval_setting,
                     "raw_accuracy": probe_accuracy,
                     "norm_accuracy": probe_accuracy,
                     "raw_macro_f1": probe_macro_f1,
