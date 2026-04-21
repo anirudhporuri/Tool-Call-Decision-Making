@@ -5,7 +5,7 @@
 #SBATCH --partition=class
 #SBATCH --account=class
 #SBATCH --qos=default
-#SBATCH --time=45:00:00
+#SBATCH --time=42:00:00
 #SBATCH --mem=32g
 #SBATCH --gres=gpu:1
 
