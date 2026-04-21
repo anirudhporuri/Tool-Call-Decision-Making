@@ -203,7 +203,29 @@ def extract_leading_json(text: str) -> Any:
 
 
 def _ast_literal(node: ast.AST) -> Any:
-    return ast.literal_eval(node)
+    try:
+        return ast.literal_eval(node)
+    except (ValueError, SyntaxError):
+        if isinstance(node, ast.Name):
+            lowered = node.id.lower()
+            if lowered == "true":
+                return True
+            if lowered == "false":
+                return False
+            if lowered in {"none", "null"}:
+                return None
+            return node.id
+        if isinstance(node, ast.Attribute):
+            return ast.unparse(node)
+        if isinstance(node, ast.Constant):
+            return node.value
+        if isinstance(node, ast.JoinedStr):
+            return ast.unparse(node)
+        if isinstance(node, ast.Call):
+            return ast.unparse(node)
+        if isinstance(node, ast.Subscript):
+            return ast.unparse(node)
+        raise
 
 
 def parse_llama_single_toolcall(text: str) -> Optional[Dict[str, Any]]:
