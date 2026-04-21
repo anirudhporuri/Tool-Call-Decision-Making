@@ -6,12 +6,14 @@ import os
 from typing import Any, Dict, List, Optional, Sequence
 
 from cai_stage_utils import (
+    load_existing_stage_records,
     load_selected_source_rows,
     ordered_stage_rows,
     should_enforce_strict_balance,
     source_balance,
 )
 from cai_utils import (
+    append_jsonl,
     build_preference_prompt,
     count_label_values,
     ensure_dir,
@@ -187,119 +189,198 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         )
         return
 
-    tokenizer, model = load_generation_model(
-        model_name_or_path=args.judge_model_name_or_path,
-        hf_token=args.hf_token,
-        dtype=args.dtype,
-        attn_implementation=args.attn_implementation,
-        load_in_4bit=args.load_in_4bit,
-        trust_remote_code=args.trust_remote_code,
-    )
-
-    record_slots: List[Optional[Dict[str, Any]]] = [None] * len(source_rows)
-    judge_tasks: List[Dict[str, Any]] = []
-    iterator = progress(
-        enumerate(zip(source_rows, pair_rows)),
-        total=len(source_rows),
-        desc=f"{args.judge_family} preferences",
-        leave=False,
-    )
-    for idx, (source_row, pair_row) in iterator:
-        response_a = pair_row["response_a"]
-        response_b = pair_row["response_b"]
-        failure_reason = None
-        preferred_response = None
-        rejected_response = None
-        chosen_class = None
-
-        if not response_a or not response_b:
-            parsed = {"valid": False, "winner": None, "reason": None, "raw_text": ""}
-            failure_reason = "empty_candidate"
-            valid = False
-            record_slots[idx] = {
-                "example_id": source_row["example_id"],
-                "source_row_index": source_row["source_row_index"],
-                "source_split": source_row["source_split"],
-                "chosen_behavior_class": source_row["chosen_behavior_class"],
-                "tools": source_row["tools"],
-                "messages": source_row["messages"],
-                "response_a": response_a,
-                "response_b": response_b,
-                "preference": parsed,
-                "preferred_response": preferred_response,
-                "rejected_response": rejected_response,
-                "chosen_class": chosen_class,
-                "valid": valid,
-                "failure_reason": failure_reason,
-            }
-        elif response_a == response_b:
-            parsed = {"valid": False, "winner": None, "reason": None, "raw_text": ""}
-            failure_reason = "duplicate_candidates"
-            valid = False
-            record_slots[idx] = {
-                "example_id": source_row["example_id"],
-                "source_row_index": source_row["source_row_index"],
-                "source_split": source_row["source_split"],
-                "chosen_behavior_class": source_row["chosen_behavior_class"],
-                "tools": source_row["tools"],
-                "messages": source_row["messages"],
-                "response_a": response_a,
-                "response_b": response_b,
-                "preference": parsed,
-                "preferred_response": preferred_response,
-                "rejected_response": rejected_response,
-                "chosen_class": chosen_class,
-                "valid": valid,
-                "failure_reason": failure_reason,
-            }
-        else:
-            judge_tasks.append(
-                {
-                    "record_index": idx,
-                    "source_row": source_row,
-                    "pair_row": pair_row,
-                    "prompt": build_preference_prompt(
-                        model_family=args.judge_family,
-                        constitution=constitution,
-                        user_request=source_row["user_request"],
-                        tools=source_row["tools"],
-                        response_a=response_a,
-                        response_b=response_b,
-                        tokenizer=tokenizer,
-                    ),
-                }
-            )
-
-    retry_tasks: List[Dict[str, Any]] = []
-    generation_iterator = progress(
-        range(0, len(judge_tasks), args.batch_size),
-        total=(len(judge_tasks) + args.batch_size - 1) // args.batch_size if judge_tasks else 0,
-        desc=f"{args.judge_family} preference first pass",
-        leave=False,
-    )
-    for start_idx in generation_iterator:
-        task_batch = judge_tasks[start_idx : start_idx + args.batch_size]
-        prompts = [task["prompt"] for task in task_batch]
-        raw_outputs = generate_responses(
-            model=model,
-            tokenizer=tokenizer,
-            prompts=prompts,
-            model_family=args.judge_family,
-            max_new_tokens=args.max_new_tokens,
-            do_sample=False,
-            seed=args.seed + start_idx,
-            max_prompt_length=args.max_prompt_length,
+    master_path = out_dir / "master_records.jsonl"
+    existing_records, existing_by_id = load_existing_stage_records(master_path, source_rows, "preferences")
+    remaining_indices = [
+        idx for idx, source_row in enumerate(source_rows) if source_row["example_id"] not in existing_by_id
+    ]
+    if existing_records:
+        print(
+            f"Resuming preferences from {master_path} with "
+            f"{len(existing_records)} completed rows and {len(remaining_indices)} remaining."
         )
-        for task, raw_output in zip(task_batch, raw_outputs):
-            parsed = parse_preference_output(raw_output)
-            if parsed["valid"]:
+
+    tokenizer = None
+    model = None
+    if remaining_indices:
+        tokenizer, model = load_generation_model(
+            model_name_or_path=args.judge_model_name_or_path,
+            hf_token=args.hf_token,
+            dtype=args.dtype,
+            attn_implementation=args.attn_implementation,
+            load_in_4bit=args.load_in_4bit,
+            trust_remote_code=args.trust_remote_code,
+        )
+
+        judge_tasks: List[Dict[str, Any]] = []
+        iterator = progress(
+            remaining_indices,
+            total=len(remaining_indices),
+            desc=f"{args.judge_family} preferences",
+            leave=False,
+        )
+        for idx in iterator:
+            source_row = source_rows[idx]
+            pair_row = pair_rows[idx]
+            response_a = pair_row["response_a"]
+            response_b = pair_row["response_b"]
+            failure_reason = None
+            preferred_response = None
+            rejected_response = None
+            chosen_class = None
+
+            if not response_a or not response_b:
+                parsed = {"valid": False, "winner": None, "reason": None, "raw_text": ""}
+                failure_reason = "empty_candidate"
+                valid = False
+                record = {
+                    "example_id": source_row["example_id"],
+                    "source_row_index": source_row["source_row_index"],
+                    "source_split": source_row["source_split"],
+                    "chosen_behavior_class": source_row["chosen_behavior_class"],
+                    "tools": source_row["tools"],
+                    "messages": source_row["messages"],
+                    "response_a": response_a,
+                    "response_b": response_b,
+                    "preference": parsed,
+                    "preferred_response": preferred_response,
+                    "rejected_response": rejected_response,
+                    "chosen_class": chosen_class,
+                    "valid": valid,
+                    "failure_reason": failure_reason,
+                }
+                existing_by_id[source_row["example_id"]] = record
+                append_jsonl(master_path, [record])
+            elif response_a == response_b:
+                parsed = {"valid": False, "winner": None, "reason": None, "raw_text": ""}
+                failure_reason = "duplicate_candidates"
+                valid = False
+                record = {
+                    "example_id": source_row["example_id"],
+                    "source_row_index": source_row["source_row_index"],
+                    "source_split": source_row["source_split"],
+                    "chosen_behavior_class": source_row["chosen_behavior_class"],
+                    "tools": source_row["tools"],
+                    "messages": source_row["messages"],
+                    "response_a": response_a,
+                    "response_b": response_b,
+                    "preference": parsed,
+                    "preferred_response": preferred_response,
+                    "rejected_response": rejected_response,
+                    "chosen_class": chosen_class,
+                    "valid": valid,
+                    "failure_reason": failure_reason,
+                }
+                existing_by_id[source_row["example_id"]] = record
+                append_jsonl(master_path, [record])
+            else:
+                judge_tasks.append(
+                    {
+                        "record_index": idx,
+                        "source_row": source_row,
+                        "pair_row": pair_row,
+                        "prompt": build_preference_prompt(
+                            model_family=args.judge_family,
+                            constitution=constitution,
+                            user_request=source_row["user_request"],
+                            tools=source_row["tools"],
+                            response_a=response_a,
+                            response_b=response_b,
+                            tokenizer=tokenizer,
+                        ),
+                    }
+                )
+
+        retry_tasks: List[Dict[str, Any]] = []
+        generation_iterator = progress(
+            range(0, len(judge_tasks), args.batch_size),
+            total=(len(judge_tasks) + args.batch_size - 1) // args.batch_size if judge_tasks else 0,
+            desc=f"{args.judge_family} preference first pass",
+            leave=False,
+        )
+        for start_idx in generation_iterator:
+            task_batch = judge_tasks[start_idx : start_idx + args.batch_size]
+            prompts = [task["prompt"] for task in task_batch]
+            raw_outputs = generate_responses(
+                model=model,
+                tokenizer=tokenizer,
+                prompts=prompts,
+                model_family=args.judge_family,
+                max_new_tokens=args.max_new_tokens,
+                do_sample=False,
+                seed=args.seed + task_batch[0]["source_row"]["source_row_index"],
+                max_prompt_length=args.max_prompt_length,
+            )
+            completed_batch_records: List[Dict[str, Any]] = []
+            for task, raw_output in zip(task_batch, raw_outputs):
+                parsed = parse_preference_output(raw_output)
+                if parsed["valid"]:
+                    pair_row = task["pair_row"]
+                    source_row = task["source_row"]
+                    winner = parsed["winner"]
+                    preferred_response = pair_row["response_a"] if winner == "A" else pair_row["response_b"]
+                    rejected_response = pair_row["response_b"] if winner == "A" else pair_row["response_a"]
+                    chosen_class = pair_row["response_a_class"] if winner == "A" else pair_row["response_b_class"]
+                    record = {
+                        "example_id": source_row["example_id"],
+                        "source_row_index": source_row["source_row_index"],
+                        "source_split": source_row["source_split"],
+                        "chosen_behavior_class": source_row["chosen_behavior_class"],
+                        "tools": source_row["tools"],
+                        "messages": source_row["messages"],
+                        "response_a": pair_row["response_a"],
+                        "response_b": pair_row["response_b"],
+                        "preference": parsed,
+                        "preferred_response": preferred_response,
+                        "rejected_response": rejected_response,
+                        "chosen_class": chosen_class,
+                        "valid": True,
+                        "failure_reason": None,
+                    }
+                    existing_by_id[source_row["example_id"]] = record
+                    completed_batch_records.append(record)
+                else:
+                    retry_tasks.append(task)
+            append_jsonl(master_path, completed_batch_records)
+
+        retry_iterator = progress(
+            range(0, len(retry_tasks), args.batch_size),
+            total=(len(retry_tasks) + args.batch_size - 1) // args.batch_size if retry_tasks else 0,
+            desc=f"{args.judge_family} preference retries",
+            leave=False,
+        )
+        for start_idx in retry_iterator:
+            task_batch = retry_tasks[start_idx : start_idx + args.batch_size]
+            prompts = [task["prompt"] for task in task_batch]
+            raw_outputs = generate_responses(
+                model=model,
+                tokenizer=tokenizer,
+                prompts=prompts,
+                model_family=args.judge_family,
+                max_new_tokens=args.max_new_tokens,
+                do_sample=False,
+                seed=args.seed + 1_000_000 + task_batch[0]["source_row"]["source_row_index"],
+                max_prompt_length=args.max_prompt_length,
+            )
+            batch_records: List[Dict[str, Any]] = []
+            for task, raw_output in zip(task_batch, raw_outputs):
+                parsed = parse_preference_output(raw_output)
                 pair_row = task["pair_row"]
                 source_row = task["source_row"]
-                winner = parsed["winner"]
-                preferred_response = pair_row["response_a"] if winner == "A" else pair_row["response_b"]
-                rejected_response = pair_row["response_b"] if winner == "A" else pair_row["response_a"]
-                chosen_class = pair_row["response_a_class"] if winner == "A" else pair_row["response_b_class"]
-                record_slots[task["record_index"]] = {
+                if parsed["valid"]:
+                    winner = parsed["winner"]
+                    preferred_response = pair_row["response_a"] if winner == "A" else pair_row["response_b"]
+                    rejected_response = pair_row["response_b"] if winner == "A" else pair_row["response_a"]
+                    chosen_class = pair_row["response_a_class"] if winner == "A" else pair_row["response_b_class"]
+                    valid = True
+                    failure_reason = None
+                else:
+                    preferred_response = None
+                    rejected_response = None
+                    chosen_class = None
+                    valid = False
+                    failure_reason = "preference_parse_failed"
+                record = {
                     "example_id": source_row["example_id"],
                     "source_row_index": source_row["source_row_index"],
                     "source_split": source_row["source_split"],
@@ -312,71 +393,16 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
                     "preferred_response": preferred_response,
                     "rejected_response": rejected_response,
                     "chosen_class": chosen_class,
-                    "valid": True,
-                    "failure_reason": None,
+                    "valid": valid,
+                    "failure_reason": failure_reason,
                 }
-            else:
-                retry_tasks.append(task)
+                existing_by_id[source_row["example_id"]] = record
+                batch_records.append(record)
+            append_jsonl(master_path, batch_records)
 
-    retry_iterator = progress(
-        range(0, len(retry_tasks), args.batch_size),
-        total=(len(retry_tasks) + args.batch_size - 1) // args.batch_size if retry_tasks else 0,
-        desc=f"{args.judge_family} preference retries",
-        leave=False,
-    )
-    for start_idx in retry_iterator:
-        task_batch = retry_tasks[start_idx : start_idx + args.batch_size]
-        prompts = [task["prompt"] for task in task_batch]
-        raw_outputs = generate_responses(
-            model=model,
-            tokenizer=tokenizer,
-            prompts=prompts,
-            model_family=args.judge_family,
-            max_new_tokens=args.max_new_tokens,
-            do_sample=False,
-            seed=args.seed + 1_000_000 + start_idx,
-            max_prompt_length=args.max_prompt_length,
-        )
-        for task, raw_output in zip(task_batch, raw_outputs):
-            parsed = parse_preference_output(raw_output)
-            pair_row = task["pair_row"]
-            source_row = task["source_row"]
-            if parsed["valid"]:
-                winner = parsed["winner"]
-                preferred_response = pair_row["response_a"] if winner == "A" else pair_row["response_b"]
-                rejected_response = pair_row["response_b"] if winner == "A" else pair_row["response_a"]
-                chosen_class = pair_row["response_a_class"] if winner == "A" else pair_row["response_b_class"]
-                valid = True
-                failure_reason = None
-            else:
-                preferred_response = None
-                rejected_response = None
-                chosen_class = None
-                valid = False
-                failure_reason = "preference_parse_failed"
-            record_slots[task["record_index"]] = {
-                "example_id": source_row["example_id"],
-                "source_row_index": source_row["source_row_index"],
-                "source_split": source_row["source_split"],
-                "chosen_behavior_class": source_row["chosen_behavior_class"],
-                "tools": source_row["tools"],
-                "messages": source_row["messages"],
-                "response_a": pair_row["response_a"],
-                "response_b": pair_row["response_b"],
-                "preference": parsed,
-                "preferred_response": preferred_response,
-                "rejected_response": rejected_response,
-                "chosen_class": chosen_class,
-                "valid": valid,
-                "failure_reason": failure_reason,
-            }
-    if any(record is None for record in record_slots):
-        raise RuntimeError("Missing preference records after batched judging.")
-    records = [record for record in record_slots if record is not None]
+        unload_model(tokenizer, model)
 
-    unload_model(tokenizer, model)
-
-    master_path = out_dir / "master_records.jsonl"
+    records = [existing_by_id[row["example_id"]] for row in source_rows]
     write_jsonl(master_path, records)
     export_dataset = export_rows(records)
     export_path = out_dir / "cai_dpo_dataset.jsonl"
@@ -392,6 +418,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             "source_examples": len(source_rows),
             "source_balance": selected_balance,
             "strict_balance_enforced": strict_balance,
+            "resumed_existing_rows": len(existing_records),
             "outputs": {
                 "master_records": str(master_path),
                 "export_dataset": str(export_path),

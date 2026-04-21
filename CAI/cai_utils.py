@@ -93,13 +93,19 @@ def save_json(path: str | Path, payload: Dict[str, Any]) -> None:
     Path(path).write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
-def load_jsonl(path: str | Path) -> List[Dict[str, Any]]:
+def load_jsonl(path: str | Path, *, allow_partial_last_line: bool = False) -> List[Dict[str, Any]]:
     rows: List[Dict[str, Any]] = []
-    with Path(path).open("r", encoding="utf-8") as handle:
-        for line in handle:
-            line = line.strip()
-            if line:
+    path_obj = Path(path)
+    lines = path_obj.read_text(encoding="utf-8").splitlines()
+    for line_idx, line in enumerate(lines, start=1):
+        line = line.strip()
+        if line:
+            try:
                 rows.append(json.loads(line))
+            except json.JSONDecodeError:
+                if allow_partial_last_line and line_idx == len(lines):
+                    break
+                raise
     return rows
 
 
@@ -107,6 +113,16 @@ def write_jsonl(path: str | Path, rows: Iterable[Dict[str, Any]]) -> None:
     with Path(path).open("w", encoding="utf-8") as handle:
         for row in rows:
             handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+
+def append_jsonl(path: str | Path, rows: Iterable[Dict[str, Any]]) -> None:
+    rows_list = list(rows)
+    if not rows_list:
+        return
+    with Path(path).open("a", encoding="utf-8") as handle:
+        for row in rows_list:
+            handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+        handle.flush()
 
 
 def progress(iterable: Iterable[Any], **kwargs: Any) -> Iterable[Any]:
@@ -630,8 +646,13 @@ def _build_generation_config(
     generation_config = copy.deepcopy(model.generation_config)
     generation_config.do_sample = do_sample
     generation_config.max_new_tokens = max_new_tokens
-    generation_config.pad_token_id = tokenizer.pad_token_id
-    generation_config.eos_token_id = tokenizer.eos_token_id
+    if generation_config.pad_token_id is None:
+        generation_config.pad_token_id = tokenizer.pad_token_id
+    # Preserve any model-specific stop-token configuration. Chat models like
+    # Gemma may ship multiple EOS/turn-ending ids in generation_config, and
+    # replacing that with tokenizer.eos_token_id can make generation run long.
+    if generation_config.eos_token_id is None:
+        generation_config.eos_token_id = tokenizer.eos_token_id
     if do_sample:
         generation_config.temperature = temperature if temperature is not None else 1.0
         generation_config.top_p = top_p if top_p is not None else 1.0

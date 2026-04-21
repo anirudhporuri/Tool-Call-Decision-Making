@@ -7,11 +7,13 @@ from typing import Any, Dict, List, Optional, Sequence
 
 from cai_stage_utils import load_selected_source_rows, should_enforce_strict_balance, source_balance
 from cai_utils import (
+    append_jsonl,
     build_policy_prompt,
     ensure_dir,
     evaluate_candidate_response,
     generate_responses,
     load_generation_model,
+    load_jsonl,
     progress,
     save_json,
     unload_model,
@@ -114,6 +116,18 @@ def summarize_records(records: List[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
+def index_records_by_example_id(records: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    indexed: Dict[str, Dict[str, Any]] = {}
+    for record in records:
+        example_id = record.get("example_id")
+        if not example_id:
+            raise ValueError(f"Initial output record missing example_id: {record}")
+        if example_id in indexed:
+            raise ValueError(f"Duplicate initial output record for example_id={example_id}")
+        indexed[example_id] = record
+    return indexed
+
+
 def main(argv: Optional[Sequence[str]] = None) -> None:
     args = parse_args(argv)
     if args.batch_size < 1:
@@ -159,41 +173,62 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         )
         return
 
-    tokenizer, model = load_generation_model(
-        model_name_or_path=args.policy_model_name_or_path,
-        hf_token=args.hf_token,
-        dtype=args.dtype,
-        attn_implementation=args.attn_implementation,
-        load_in_4bit=args.load_in_4bit,
-        trust_remote_code=args.trust_remote_code,
-    )
-
-    records: List[Dict[str, Any]] = []
-    iterator = progress(
-        range(0, len(source_rows), args.batch_size),
-        total=(len(source_rows) + args.batch_size - 1) // args.batch_size,
-        desc=f"{args.policy_family} initial outputs",
-        leave=False,
-    )
-    for start_idx in iterator:
-        batch_rows = source_rows[start_idx : start_idx + args.batch_size]
-        prompts = [build_policy_prompt(args.policy_family, row) for row in batch_rows]
-        initial_outputs_raw = generate_responses(
-            model=model,
-            tokenizer=tokenizer,
-            prompts=prompts,
-            model_family=args.policy_family,
-            max_new_tokens=args.max_new_tokens,
-            do_sample=True,
-            temperature=args.temperature,
-            top_p=args.top_p,
-            seed=args.seed + start_idx,
-            max_prompt_length=args.max_prompt_length,
+    output_path = out_dir / "initial_outputs.jsonl"
+    existing_records: List[Dict[str, Any]] = []
+    if output_path.exists():
+        existing_records = load_jsonl(output_path, allow_partial_last_line=True)
+    existing_by_id = index_records_by_example_id(existing_records)
+    source_example_ids = {row["example_id"] for row in source_rows}
+    extra_ids = sorted(set(existing_by_id) - source_example_ids)
+    if extra_ids:
+        raise ValueError(
+            f"Existing initial outputs contain rows not present in the selected source set: {extra_ids[:3]}"
         )
-        for row, initial_output_raw in zip(batch_rows, initial_outputs_raw):
-            evaluation = evaluate_candidate_response(initial_output_raw, row["tools"])
-            records.append(
-                {
+    remaining_rows = [row for row in source_rows if row["example_id"] not in existing_by_id]
+
+    if existing_records:
+        print(
+            f"Resuming initial outputs from {output_path} with "
+            f"{len(existing_records)} completed rows and {len(remaining_rows)} remaining."
+        )
+
+    tokenizer = None
+    model = None
+    if remaining_rows:
+        tokenizer, model = load_generation_model(
+            model_name_or_path=args.policy_model_name_or_path,
+            hf_token=args.hf_token,
+            dtype=args.dtype,
+            attn_implementation=args.attn_implementation,
+            load_in_4bit=args.load_in_4bit,
+            trust_remote_code=args.trust_remote_code,
+        )
+
+        iterator = progress(
+            range(0, len(remaining_rows), args.batch_size),
+            total=(len(remaining_rows) + args.batch_size - 1) // args.batch_size,
+            desc=f"{args.policy_family} initial outputs",
+            leave=False,
+        )
+        for batch_offset in iterator:
+            batch_rows = remaining_rows[batch_offset : batch_offset + args.batch_size]
+            prompts = [build_policy_prompt(args.policy_family, row) for row in batch_rows]
+            initial_outputs_raw = generate_responses(
+                model=model,
+                tokenizer=tokenizer,
+                prompts=prompts,
+                model_family=args.policy_family,
+                max_new_tokens=args.max_new_tokens,
+                do_sample=True,
+                temperature=args.temperature,
+                top_p=args.top_p,
+                seed=args.seed + batch_rows[0]["source_row_index"],
+                max_prompt_length=args.max_prompt_length,
+            )
+            batch_records: List[Dict[str, Any]] = []
+            for row, initial_output_raw in zip(batch_rows, initial_outputs_raw):
+                evaluation = evaluate_candidate_response(initial_output_raw, row["tools"])
+                record = {
                     "example_id": row["example_id"],
                     "source_row_index": row["source_row_index"],
                     "source_split": row["source_split"],
@@ -208,12 +243,14 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
                     "initial_output_validation_reason": evaluation["reason"],
                     "initial_output_structural_kind": evaluation["structural_kind"],
                 }
-            )
+                existing_by_id[row["example_id"]] = record
+                batch_records.append(record)
+            append_jsonl(output_path, batch_records)
 
-    unload_model(tokenizer, model)
+        unload_model(tokenizer, model)
 
-    output_path = out_dir / "initial_outputs.jsonl"
-    write_jsonl(output_path, records)
+    ordered_records = [existing_by_id[row["example_id"]] for row in source_rows]
+    write_jsonl(output_path, ordered_records)
     save_json(
         out_dir / "summary.json",
         {
@@ -223,10 +260,11 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             "source_examples": len(source_rows),
             "source_balance": selected_balance,
             "strict_balance_enforced": strict_balance,
+            "resumed_existing_rows": len(existing_records),
             "outputs": {
                 "initial_outputs": str(output_path),
             },
-            "result_summary": summarize_records(records),
+            "result_summary": summarize_records(ordered_records),
         },
     )
 

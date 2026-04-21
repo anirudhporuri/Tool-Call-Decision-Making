@@ -5,8 +5,9 @@ import argparse
 import os
 from typing import Any, Dict, List, Optional, Sequence
 
-from cai_stage_utils import load_selected_source_rows, ordered_stage_rows
+from cai_stage_utils import load_existing_stage_records, load_selected_source_rows, ordered_stage_rows
 from cai_utils import (
+    append_jsonl,
     build_critique_prompt,
     build_fallback_critique_text,
     critique_missing_fields,
@@ -160,54 +161,70 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         )
         return
 
-    tokenizer, model = load_generation_model(
-        model_name_or_path=args.critic_model_name_or_path,
-        hf_token=args.hf_token,
-        dtype=args.dtype,
-        attn_implementation=args.attn_implementation,
-        load_in_4bit=args.load_in_4bit,
-        trust_remote_code=args.trust_remote_code,
-    )
-
-    records: List[Dict[str, Any]] = []
-    iterator = progress(
-        range(0, len(source_rows), args.batch_size),
-        total=(len(source_rows) + args.batch_size - 1) // args.batch_size,
-        desc=f"{args.critic_family} critiques",
-        leave=False,
-    )
-    for start_idx in iterator:
-        batch_source_rows = source_rows[start_idx : start_idx + args.batch_size]
-        batch_initial_rows = initial_rows[start_idx : start_idx + args.batch_size]
-        prompts = []
-        for source_row, initial_row in zip(batch_source_rows, batch_initial_rows):
-            assistant_response = initial_row.get("initial_output_raw") or initial_row["initial_output"]
-            prompts.append(
-                build_critique_prompt(
-                    model_family=args.critic_family,
-                    constitution=constitution,
-                    user_request=source_row["user_request"],
-                    tools=source_row["tools"],
-                    assistant_response=assistant_response,
-                    tokenizer=tokenizer,
-                )
-            )
-        raw_critiques = generate_responses(
-            model=model,
-            tokenizer=tokenizer,
-            prompts=prompts,
-            model_family=args.critic_family,
-            max_new_tokens=args.max_new_tokens,
-            do_sample=False,
-            seed=args.seed + start_idx,
-            max_prompt_length=args.max_prompt_length,
+    output_path = out_dir / "critiques.jsonl"
+    existing_records, existing_by_id = load_existing_stage_records(output_path, source_rows, "critiques")
+    remaining_indices = [
+        idx for idx, source_row in enumerate(source_rows) if source_row["example_id"] not in existing_by_id
+    ]
+    if existing_records:
+        print(
+            f"Resuming critiques from {output_path} with "
+            f"{len(existing_records)} completed rows and {len(remaining_indices)} remaining."
         )
-        for source_row, first_raw in zip(batch_source_rows, raw_critiques):
-            parsed = parse_critique_output(first_raw)
-            fallback_used = not parsed["valid"]
-            effective_text = parsed["raw_text"] if parsed["raw_text"] else build_fallback_critique_text([first_raw], [parsed])
-            records.append(
-                {
+
+    tokenizer = None
+    model = None
+    if remaining_indices:
+        tokenizer, model = load_generation_model(
+            model_name_or_path=args.critic_model_name_or_path,
+            hf_token=args.hf_token,
+            dtype=args.dtype,
+            attn_implementation=args.attn_implementation,
+            load_in_4bit=args.load_in_4bit,
+            trust_remote_code=args.trust_remote_code,
+        )
+
+        iterator = progress(
+            range(0, len(remaining_indices), args.batch_size),
+            total=(len(remaining_indices) + args.batch_size - 1) // args.batch_size,
+            desc=f"{args.critic_family} critiques",
+            leave=False,
+        )
+        for offset in iterator:
+            batch_indices = remaining_indices[offset : offset + args.batch_size]
+            batch_source_rows = [source_rows[idx] for idx in batch_indices]
+            batch_initial_rows = [initial_rows[idx] for idx in batch_indices]
+            prompts = []
+            for source_row, initial_row in zip(batch_source_rows, batch_initial_rows):
+                assistant_response = initial_row.get("initial_output_raw") or initial_row["initial_output"]
+                prompts.append(
+                    build_critique_prompt(
+                        model_family=args.critic_family,
+                        constitution=constitution,
+                        user_request=source_row["user_request"],
+                        tools=source_row["tools"],
+                        assistant_response=assistant_response,
+                        tokenizer=tokenizer,
+                    )
+                )
+            raw_critiques = generate_responses(
+                model=model,
+                tokenizer=tokenizer,
+                prompts=prompts,
+                model_family=args.critic_family,
+                max_new_tokens=args.max_new_tokens,
+                do_sample=False,
+                seed=args.seed + batch_source_rows[0]["source_row_index"],
+                max_prompt_length=args.max_prompt_length,
+            )
+            batch_records: List[Dict[str, Any]] = []
+            for source_row, first_raw in zip(batch_source_rows, raw_critiques):
+                parsed = parse_critique_output(first_raw)
+                fallback_used = not parsed["valid"]
+                effective_text = (
+                    parsed["raw_text"] if parsed["raw_text"] else build_fallback_critique_text([first_raw], [parsed])
+                )
+                record = {
                     "example_id": source_row["example_id"],
                     "source_row_index": source_row["source_row_index"],
                     "source_split": source_row["source_split"],
@@ -222,11 +239,13 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
                     "critique_fallback_used": fallback_used,
                     "critique_effective_text": effective_text,
                 }
-            )
+                existing_by_id[source_row["example_id"]] = record
+                batch_records.append(record)
+            append_jsonl(output_path, batch_records)
 
-    unload_model(tokenizer, model)
+        unload_model(tokenizer, model)
 
-    output_path = out_dir / "critiques.jsonl"
+    records = [existing_by_id[row["example_id"]] for row in source_rows]
     write_jsonl(output_path, records)
     save_json(
         out_dir / "summary.json",
@@ -236,6 +255,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             "source_file": args.source_file,
             "initial_outputs_file": args.initial_outputs_file,
             "source_examples": len(source_rows),
+            "resumed_existing_rows": len(existing_records),
             "outputs": {
                 "critiques": str(output_path),
             },

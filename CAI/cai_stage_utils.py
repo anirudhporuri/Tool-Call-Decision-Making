@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from cai_utils import count_label_values, load_jsonl, source_prompt_messages, source_user_request_text, validate_balanced_counts
 
@@ -112,3 +112,21 @@ def ordered_stage_rows(
         if extras:
             raise ValueError(f"{stage_name} contains rows not present in source set: {extras[:3]}")
     return ordered
+
+
+def load_existing_stage_records(
+    output_path: str | Path,
+    source_rows: List[Dict[str, Any]],
+    stage_name: str,
+) -> Tuple[List[Dict[str, Any]], Dict[str, Dict[str, Any]]]:
+    output_path = Path(output_path)
+    if not output_path.exists():
+        return [], {}
+
+    existing_rows = load_jsonl(output_path, allow_partial_last_line=True)
+    indexed = index_stage_rows(existing_rows, stage_name)
+    source_example_ids = {row["example_id"] for row in source_rows}
+    extras = sorted(set(indexed) - source_example_ids)
+    if extras:
+        raise ValueError(f"{stage_name} contains rows not present in source set: {extras[:3]}")
+    return existing_rows, indexed
