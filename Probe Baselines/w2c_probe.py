@@ -375,7 +375,14 @@ def has_local_tokenizer_files(path: str | Path) -> bool:
     candidate = Path(path)
     if not candidate.exists() or not candidate.is_dir():
         return False
-    return any((candidate / filename).exists() for filename in TOKENIZER_FILE_HINTS)
+    if (candidate / "tokenizer.json").exists():
+        return True
+    if any(
+        (candidate / filename).exists()
+        for filename in ("tokenizer.model", "sentencepiece.bpe.model", "spiece.model")
+    ):
+        return True
+    return (candidate / "vocab.json").exists() and (candidate / "merges.txt").exists()
 
 
 def resolve_peft_base_model_source(

@@ -21,6 +21,7 @@ set -euo pipefail
 source ~/.bashrc
 REPO_ROOT="/fs/classhomes/mukunds/Tool-Call-Decision-Making"
 VENV_DIR="${REPO_ROOT}/.venv"
+LLAMA_BASE_MODEL_DIR="${REPO_ROOT}/cluster_cache/model_cache/meta-llama__Llama-3.2-3B-Instruct"
 
 echo "Activating virtualenv at ${VENV_DIR}"
 # shellcheck disable=SC1091
@@ -34,5 +35,6 @@ python3 -u "${REPO_ROOT}/Probe Baselines/run_probe.py" \
   "llama" \
   "${OUTPUT_DIR}" \
   "${EVAL_SAMPLES}" \
+  --peft-base-model-override "${LLAMA_BASE_MODEL_DIR}" \
   --dataset-dir "${REPO_ROOT}/local_datasets" \
   "$@"
