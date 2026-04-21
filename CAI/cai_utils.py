@@ -280,6 +280,22 @@ def parse_llama_single_toolcall(text: str) -> Optional[Dict[str, Any]]:
     return {"name": body.func.id, "arguments": arguments}
 
 
+def _json_safe_tool_value(value: Any) -> Any:
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, dict):
+        return {str(key): _json_safe_tool_value(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe_tool_value(item) for item in value]
+    if isinstance(value, set):
+        normalized_items = [_json_safe_tool_value(item) for item in value]
+        return sorted(
+            normalized_items,
+            key=lambda item: json.dumps(item, ensure_ascii=False, sort_keys=True),
+        )
+    return str(value)
+
+
 def normalize_tool_call(call: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     if not isinstance(call, dict):
         return None
@@ -290,33 +306,39 @@ def normalize_tool_call(call: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         args = {}
     if not isinstance(args, dict):
         return None
-    return {"name": call["name"], "arguments": args}
+    return {
+        "name": str(call["name"]),
+        "arguments": _json_safe_tool_value(args),
+    }
 
 
 def parse_single_tool_call(text: str) -> Optional[Dict[str, Any]]:
-    if not isinstance(text, str):
+    try:
+        if not isinstance(text, str):
+            return None
+
+        stripped = text.strip()
+        if not stripped:
+            return None
+
+        payload = extract_toolcall_payload(stripped)
+        candidate = payload if payload is not None else stripped
+
+        parsed_json = maybe_json_load(candidate)
+        if isinstance(parsed_json, dict):
+            return normalize_tool_call(parsed_json)
+        if isinstance(parsed_json, list) and len(parsed_json) == 1 and isinstance(parsed_json[0], dict):
+            return normalize_tool_call(parsed_json[0])
+
+        leading_json = extract_leading_json(candidate)
+        if isinstance(leading_json, dict):
+            return normalize_tool_call(leading_json)
+        if isinstance(leading_json, list) and len(leading_json) == 1 and isinstance(leading_json[0], dict):
+            return normalize_tool_call(leading_json[0])
+
+        return parse_llama_single_toolcall(candidate)
+    except Exception:
         return None
-
-    stripped = text.strip()
-    if not stripped:
-        return None
-
-    payload = extract_toolcall_payload(stripped)
-    candidate = payload if payload is not None else stripped
-
-    parsed_json = maybe_json_load(candidate)
-    if isinstance(parsed_json, dict):
-        return normalize_tool_call(parsed_json)
-    if isinstance(parsed_json, list) and len(parsed_json) == 1 and isinstance(parsed_json[0], dict):
-        return normalize_tool_call(parsed_json[0])
-
-    leading_json = extract_leading_json(candidate)
-    if isinstance(leading_json, dict):
-        return normalize_tool_call(leading_json)
-    if isinstance(leading_json, list) and len(leading_json) == 1 and isinstance(leading_json[0], dict):
-        return normalize_tool_call(leading_json[0])
-
-    return parse_llama_single_toolcall(candidate)
 
 
 def wrap_canonical_toolcall(call: Dict[str, Any]) -> str:
@@ -332,20 +354,26 @@ def canonicalize_assistant_response(text: str) -> str:
     if not stripped:
         return ""
 
-    parsed_call = parse_single_tool_call(stripped)
-    if parsed_call is not None:
-        return wrap_canonical_toolcall(parsed_call)
+    try:
+        parsed_call = parse_single_tool_call(stripped)
+        if parsed_call is not None:
+            return wrap_canonical_toolcall(parsed_call)
+    except Exception:
+        return stripped
 
     return stripped
 
 
 def has_tool_call_marker(text: str) -> bool:
     raw = text if isinstance(text, str) else ""
-    return (
-        "<TOOLCALL>" in raw
-        or "[TOOLCALL]" in raw
-        or parse_single_tool_call(raw) is not None
-    )
+    try:
+        return (
+            "<TOOLCALL>" in raw
+            or "[TOOLCALL]" in raw
+            or parse_single_tool_call(raw) is not None
+        )
+    except Exception:
+        return False
 
 
 def _recognized_type_tokens(type_text: str) -> List[str]:
@@ -391,60 +419,66 @@ def _value_matches_type(value: Any, type_text: str) -> bool:
 
 
 def parse_tools_spec(tools: Any) -> Dict[str, Dict[str, Any]]:
-    if isinstance(tools, str):
-        candidate = maybe_json_load(tools)
-        tool_items = candidate if isinstance(candidate, list) else []
-    elif isinstance(tools, list):
-        tool_items = tools
-    else:
-        tool_items = []
+    try:
+        if isinstance(tools, str):
+            candidate = maybe_json_load(tools)
+            tool_items = candidate if isinstance(candidate, list) else []
+        elif isinstance(tools, list):
+            tool_items = tools
+        else:
+            tool_items = []
 
-    parsed_tools: Dict[str, Dict[str, Any]] = {}
-    for item in tool_items:
-        if isinstance(item, str):
-            item = maybe_json_load(item)
-        if not isinstance(item, dict) or "name" not in item:
-            continue
-        parsed_tools[str(item["name"])] = item
-    return parsed_tools
+        parsed_tools: Dict[str, Dict[str, Any]] = {}
+        for item in tool_items:
+            if isinstance(item, str):
+                item = maybe_json_load(item)
+            if not isinstance(item, dict) or "name" not in item:
+                continue
+            parsed_tools[str(item["name"])] = item
+        return parsed_tools
+    except Exception:
+        return {}
 
 
 def validate_single_tool_call(text: str, tools: Any) -> Dict[str, Any]:
-    call = parse_single_tool_call(text)
-    if call is None:
-        return {"valid": False, "reason": "not_single_tool_call", "call": None}
+    try:
+        call = parse_single_tool_call(text)
+        if call is None:
+            return {"valid": False, "reason": "not_single_tool_call", "call": None}
 
-    tool_specs = parse_tools_spec(tools)
-    tool_name = str(call["name"])
-    tool_spec = tool_specs.get(tool_name)
-    if tool_spec is None:
-        return {"valid": False, "reason": "unknown_tool", "call": call}
+        tool_specs = parse_tools_spec(tools)
+        tool_name = str(call["name"])
+        tool_spec = tool_specs.get(tool_name)
+        if tool_spec is None:
+            return {"valid": False, "reason": "unknown_tool", "call": call}
 
-    args = call.get("arguments", {})
-    if not isinstance(args, dict):
-        return {"valid": False, "reason": "arguments_not_object", "call": call}
+        args = call.get("arguments", {})
+        if not isinstance(args, dict):
+            return {"valid": False, "reason": "arguments_not_object", "call": call}
 
-    params = tool_spec.get("parameters", {}) if isinstance(tool_spec.get("parameters"), dict) else {}
-    properties = params.get("properties", {}) if isinstance(params.get("properties"), dict) else {}
-    required = tool_spec.get("required", [])
-    if not isinstance(required, list):
-        required = []
+        params = tool_spec.get("parameters", {}) if isinstance(tool_spec.get("parameters"), dict) else {}
+        properties = params.get("properties", {}) if isinstance(params.get("properties"), dict) else {}
+        required = tool_spec.get("required", [])
+        if not isinstance(required, list):
+            required = []
 
-    missing_required = [name for name in required if name not in args]
-    if missing_required:
-        return {"valid": False, "reason": f"missing_required:{','.join(missing_required)}", "call": call}
+        missing_required = [name for name in required if name not in args]
+        if missing_required:
+            return {"valid": False, "reason": f"missing_required:{','.join(missing_required)}", "call": call}
 
-    unsupported = [name for name in args if properties and name not in properties]
-    if unsupported:
-        return {"valid": False, "reason": f"unsupported_arguments:{','.join(unsupported)}", "call": call}
+        unsupported = [name for name in args if properties and name not in properties]
+        if unsupported:
+            return {"valid": False, "reason": f"unsupported_arguments:{','.join(unsupported)}", "call": call}
 
-    for arg_name, arg_value in args.items():
-        spec = properties.get(arg_name, {})
-        spec_type = spec.get("type", "") if isinstance(spec, dict) else ""
-        if spec_type and not _value_matches_type(arg_value, spec_type):
-            return {"valid": False, "reason": f"bad_argument_type:{arg_name}", "call": call}
+        for arg_name, arg_value in args.items():
+            spec = properties.get(arg_name, {})
+            spec_type = spec.get("type", "") if isinstance(spec, dict) else ""
+            if spec_type and not _value_matches_type(arg_value, spec_type):
+                return {"valid": False, "reason": f"bad_argument_type:{arg_name}", "call": call}
 
-    return {"valid": True, "reason": None, "call": call}
+        return {"valid": True, "reason": None, "call": call}
+    except Exception:
+        return {"valid": False, "reason": "tool_validation_error", "call": None}
 
 
 def has_cannot_answer_terms(text: str) -> bool:
@@ -866,38 +900,57 @@ def build_preference_prompt(
 
 
 def parse_critique_output(text: str) -> Dict[str, Any]:
-    verdict_match = VERDICT_RE.search(text)
-    primary_issue_match = PRIMARY_ISSUE_RE.search(text)
-    critique_match = CRITIQUE_RE.search(text)
-    verdict = verdict_match.group(1).upper() if verdict_match else None
-    primary_issue = primary_issue_match.group(1).strip() if primary_issue_match else None
-    critique_text = critique_match.group(1).strip() if critique_match else None
-    valid = verdict in {"NO_ISSUES", "ISSUES"} and primary_issue is not None and critique_text is not None
-    if valid and verdict == "NO_ISSUES":
-        valid = primary_issue == "none"
-    elif valid and verdict == "ISSUES":
-        valid = primary_issue in ALLOWED_PRIMARY_ISSUES
-    return {
-        "valid": valid,
-        "verdict": verdict,
-        "primary_issue": primary_issue,
-        "critique": critique_text,
-        "raw_text": text.strip(),
-    }
+    raw_text = text.strip() if isinstance(text, str) else str(text).strip()
+    try:
+        verdict_match = VERDICT_RE.search(raw_text)
+        primary_issue_match = PRIMARY_ISSUE_RE.search(raw_text)
+        critique_match = CRITIQUE_RE.search(raw_text)
+        verdict = verdict_match.group(1).upper() if verdict_match else None
+        primary_issue = primary_issue_match.group(1).strip() if primary_issue_match else None
+        critique_text = critique_match.group(1).strip() if critique_match else None
+        valid = verdict in {"NO_ISSUES", "ISSUES"} and primary_issue is not None and critique_text is not None
+        if valid and verdict == "NO_ISSUES":
+            valid = primary_issue == "none"
+        elif valid and verdict == "ISSUES":
+            valid = primary_issue in ALLOWED_PRIMARY_ISSUES
+        return {
+            "valid": valid,
+            "verdict": verdict,
+            "primary_issue": primary_issue,
+            "critique": critique_text,
+            "raw_text": raw_text,
+        }
+    except Exception:
+        return {
+            "valid": False,
+            "verdict": None,
+            "primary_issue": None,
+            "critique": None,
+            "raw_text": raw_text,
+        }
 
 
 def parse_preference_output(text: str) -> Dict[str, Any]:
-    winner_match = WINNER_RE.search(text)
-    reason_match = REASON_RE.search(text)
-    winner = winner_match.group(1).upper() if winner_match else None
-    reason = reason_match.group(1).strip() if reason_match else None
-    valid = winner in {"A", "B"} and bool(reason)
-    return {
-        "valid": valid,
-        "winner": winner,
-        "reason": reason,
-        "raw_text": text.strip(),
-    }
+    raw_text = text.strip() if isinstance(text, str) else str(text).strip()
+    try:
+        winner_match = WINNER_RE.search(raw_text)
+        reason_match = REASON_RE.search(raw_text)
+        winner = winner_match.group(1).upper() if winner_match else None
+        reason = reason_match.group(1).strip() if reason_match else None
+        valid = winner in {"A", "B"} and bool(reason)
+        return {
+            "valid": valid,
+            "winner": winner,
+            "reason": reason,
+            "raw_text": raw_text,
+        }
+    except Exception:
+        return {
+            "valid": False,
+            "winner": None,
+            "reason": None,
+            "raw_text": raw_text,
+        }
 
 
 def critique_missing_fields(parsed: Dict[str, Any]) -> List[str]:
@@ -919,7 +972,7 @@ def build_fallback_critique_text(raw_attempts: List[str], parsed_attempts: List[
     non_empty_attempts = [text.strip() for text in raw_attempts if text and text.strip()]
     if not non_empty_attempts:
         return (
-            "Critique parsing failed after two attempts.\n"
+            "Critique parsing failed.\n"
             "Missing or invalid fields: Verdict, Primary Issue, Critique.\n"
             "Use the constitution to rewrite the response correctly."
         )
@@ -934,7 +987,7 @@ def build_fallback_critique_text(raw_attempts: List[str], parsed_attempts: List[
     )
     fields_text = ", ".join(missing_fields) if missing_fields else "unknown"
     lines = [
-        "Critique parsing failed after two attempts.",
+        "Critique parsing failed.",
         f"Missing or invalid fields: {fields_text}.",
         "Use the constitution and any useful critique content below to rewrite the response correctly.",
     ]
@@ -945,10 +998,24 @@ def build_fallback_critique_text(raw_attempts: List[str], parsed_attempts: List[
 
 
 def evaluate_candidate_response(response_text: str, tools: Any) -> Dict[str, Any]:
-    canonical = canonicalize_assistant_response(response_text)
-    response_class = heuristic_class(canonical)
-    tool_call_like = has_tool_call_marker(response_text) or has_tool_call_marker(canonical)
-    tool_validation = validate_single_tool_call(canonical, tools)
+    raw_text = response_text if isinstance(response_text, str) else str(response_text or "")
+    fallback_canonical = raw_text.strip()
+    try:
+        canonical = canonicalize_assistant_response(raw_text)
+    except Exception:
+        canonical = fallback_canonical
+    try:
+        response_class = heuristic_class(canonical)
+    except Exception:
+        response_class = "other_plain_text"
+    try:
+        tool_call_like = has_tool_call_marker(raw_text) or has_tool_call_marker(canonical)
+    except Exception:
+        tool_call_like = False
+    try:
+        tool_validation = validate_single_tool_call(canonical, tools)
+    except Exception:
+        tool_validation = {"valid": False, "reason": "tool_validation_error", "call": None}
 
     if not canonical:
         valid = False
