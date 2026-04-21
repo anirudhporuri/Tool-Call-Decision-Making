@@ -10,7 +10,7 @@ from cai_utils import (
     build_revision_prompt,
     ensure_dir,
     evaluate_candidate_response,
-    generate_response,
+    generate_responses,
     get_constitution,
     load_generation_model,
     load_jsonl,
@@ -57,6 +57,8 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--start-index", type=int, default=0)
     parser.add_argument("--max-examples", type=int, default=env_int("MAX_EXAMPLES", None))
     parser.add_argument("--max-new-tokens", type=int, default=env_int("REVISION_MAX_NEW_TOKENS", 256))
+    parser.add_argument("--batch-size", type=int, default=env_int("BATCH_SIZE", 2))
+    parser.add_argument("--max-prompt-length", type=int, default=env_int("MAX_PROMPT_LENGTH", 1024))
     parser.add_argument("--dry-run", action="store_true", default=env_flag("DRY_RUN", False))
     parser.add_argument("--smoke-run", action="store_true", default=env_flag("SMOKE_RUN", False))
     parser.add_argument("--dry-run-max-examples", type=int, default=env_int("DRY_RUN_MAX_EXAMPLES", 8))
@@ -111,6 +113,8 @@ def summarize_records(records: List[Dict[str, Any]]) -> Dict[str, Any]:
 
 def main(argv: Optional[Sequence[str]] = None) -> None:
     args = parse_args(argv)
+    if args.batch_size < 1:
+        raise ValueError("--batch-size must be at least 1.")
     out_dir = ensure_dir(args.output_dir)
     save_json(out_dir / "run_config.json", sanitized_args_dict(args))
 
@@ -169,7 +173,8 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         trust_remote_code=args.trust_remote_code,
     )
 
-    records: List[Dict[str, Any]] = []
+    record_slots: List[Optional[Dict[str, Any]]] = [None] * len(source_rows)
+    generation_tasks: List[Dict[str, Any]] = []
     iterator = progress(
         enumerate(zip(source_rows, initial_rows, critique_rows)),
         total=len(source_rows),
@@ -184,29 +189,8 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         )
         if used_original_without_generation:
             revision_raw = original_response
-        else:
-            revision_prompt = build_revision_prompt(
-                model_family=args.revision_family,
-                constitution=constitution,
-                user_request=source_row["user_request"],
-                tools=source_row["tools"],
-                assistant_response=original_response,
-                critique_text=critique_row["critique_effective_text"],
-                tokenizer=tokenizer,
-            )
-            revision_raw = generate_response(
-                model=model,
-                tokenizer=tokenizer,
-                prompt=revision_prompt,
-                model_family=args.revision_family,
-                max_new_tokens=args.max_new_tokens,
-                do_sample=False,
-                seed=args.seed + idx,
-            )
-
-        evaluation = evaluate_candidate_response(revision_raw, source_row["tools"])
-        records.append(
-            {
+            evaluation = evaluate_candidate_response(revision_raw, source_row["tools"])
+            record_slots[idx] = {
                 "example_id": source_row["example_id"],
                 "source_row_index": source_row["source_row_index"],
                 "source_split": source_row["source_split"],
@@ -219,7 +203,62 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
                 "revised_output_validation_reason": evaluation["reason"],
                 "revised_output_structural_kind": evaluation["structural_kind"],
             }
+        else:
+            generation_tasks.append(
+                {
+                    "record_index": idx,
+                    "source_row": source_row,
+                    "used_original_without_generation": used_original_without_generation,
+                    "prompt": build_revision_prompt(
+                        model_family=args.revision_family,
+                        constitution=constitution,
+                        user_request=source_row["user_request"],
+                        tools=source_row["tools"],
+                        assistant_response=original_response,
+                        critique_text=critique_row["critique_effective_text"],
+                        tokenizer=tokenizer,
+                    ),
+                }
+            )
+
+    generation_iterator = progress(
+        range(0, len(generation_tasks), args.batch_size),
+        total=(len(generation_tasks) + args.batch_size - 1) // args.batch_size if generation_tasks else 0,
+        desc=f"{args.revision_family} revision generations",
+        leave=False,
+    )
+    for start_idx in generation_iterator:
+        task_batch = generation_tasks[start_idx : start_idx + args.batch_size]
+        prompts = [task["prompt"] for task in task_batch]
+        revision_outputs = generate_responses(
+            model=model,
+            tokenizer=tokenizer,
+            prompts=prompts,
+            model_family=args.revision_family,
+            max_new_tokens=args.max_new_tokens,
+            do_sample=False,
+            seed=args.seed + start_idx,
+            max_prompt_length=args.max_prompt_length,
         )
+        for task, revision_raw in zip(task_batch, revision_outputs):
+            source_row = task["source_row"]
+            evaluation = evaluate_candidate_response(revision_raw, source_row["tools"])
+            record_slots[task["record_index"]] = {
+                "example_id": source_row["example_id"],
+                "source_row_index": source_row["source_row_index"],
+                "source_split": source_row["source_split"],
+                "chosen_behavior_class": source_row["chosen_behavior_class"],
+                "revision_used_original_without_generation": task["used_original_without_generation"],
+                "revised_output_raw": revision_raw,
+                "revised_output": evaluation["canonical"],
+                "revised_output_class": evaluation["class"],
+                "revised_output_valid": evaluation["valid"],
+                "revised_output_validation_reason": evaluation["reason"],
+                "revised_output_structural_kind": evaluation["structural_kind"],
+            }
+    if any(record is None for record in record_slots):
+        raise RuntimeError("Missing revision records after batched generation.")
+    records = [record for record in record_slots if record is not None]
 
     unload_model(tokenizer, model)
 

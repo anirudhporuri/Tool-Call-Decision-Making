@@ -10,7 +10,7 @@ from cai_utils import (
     build_policy_prompt,
     ensure_dir,
     evaluate_candidate_response,
-    generate_response,
+    generate_responses,
     load_generation_model,
     progress,
     save_json,
@@ -58,6 +58,8 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--start-index", type=int, default=0)
     parser.add_argument("--max-examples", type=int, default=env_int("MAX_EXAMPLES", None))
     parser.add_argument("--max-new-tokens", type=int, default=env_int("POLICY_MAX_NEW_TOKENS", 256))
+    parser.add_argument("--batch-size", type=int, default=env_int("BATCH_SIZE", 2))
+    parser.add_argument("--max-prompt-length", type=int, default=env_int("MAX_PROMPT_LENGTH", 1024))
     parser.add_argument("--temperature", type=float, default=env_float("POLICY_TEMPERATURE", 0.7))
     parser.add_argument("--top-p", type=float, default=env_float("POLICY_TOP_P", 0.95))
     parser.add_argument("--dry-run", action="store_true", default=env_flag("DRY_RUN", False))
@@ -114,6 +116,8 @@ def summarize_records(records: List[Dict[str, Any]]) -> Dict[str, Any]:
 
 def main(argv: Optional[Sequence[str]] = None) -> None:
     args = parse_args(argv)
+    if args.batch_size < 1:
+        raise ValueError("--batch-size must be at least 1.")
     out_dir = ensure_dir(args.output_dir)
     save_json(out_dir / "run_config.json", sanitized_args_dict(args))
 
@@ -166,42 +170,45 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
 
     records: List[Dict[str, Any]] = []
     iterator = progress(
-        enumerate(source_rows),
-        total=len(source_rows),
+        range(0, len(source_rows), args.batch_size),
+        total=(len(source_rows) + args.batch_size - 1) // args.batch_size,
         desc=f"{args.policy_family} initial outputs",
         leave=False,
     )
-    for idx, row in iterator:
-        policy_prompt = build_policy_prompt(args.policy_family, row)
-        initial_output_raw = generate_response(
+    for start_idx in iterator:
+        batch_rows = source_rows[start_idx : start_idx + args.batch_size]
+        prompts = [build_policy_prompt(args.policy_family, row) for row in batch_rows]
+        initial_outputs_raw = generate_responses(
             model=model,
             tokenizer=tokenizer,
-            prompt=policy_prompt,
+            prompts=prompts,
             model_family=args.policy_family,
             max_new_tokens=args.max_new_tokens,
             do_sample=True,
             temperature=args.temperature,
             top_p=args.top_p,
-            seed=args.seed + idx,
+            seed=args.seed + start_idx,
+            max_prompt_length=args.max_prompt_length,
         )
-        evaluation = evaluate_candidate_response(initial_output_raw, row["tools"])
-        records.append(
-            {
-                "example_id": row["example_id"],
-                "source_row_index": row["source_row_index"],
-                "source_split": row["source_split"],
-                "chosen_behavior_class": row["chosen_behavior_class"],
-                "tools": row["tools"],
-                "messages": row["messages"],
-                "user_request": row["user_request"],
-                "initial_output_raw": initial_output_raw,
-                "initial_output": evaluation["canonical"],
-                "initial_output_class": evaluation["class"],
-                "initial_output_valid": evaluation["valid"],
-                "initial_output_validation_reason": evaluation["reason"],
-                "initial_output_structural_kind": evaluation["structural_kind"],
-            }
-        )
+        for row, initial_output_raw in zip(batch_rows, initial_outputs_raw):
+            evaluation = evaluate_candidate_response(initial_output_raw, row["tools"])
+            records.append(
+                {
+                    "example_id": row["example_id"],
+                    "source_row_index": row["source_row_index"],
+                    "source_split": row["source_split"],
+                    "chosen_behavior_class": row["chosen_behavior_class"],
+                    "tools": row["tools"],
+                    "messages": row["messages"],
+                    "user_request": row["user_request"],
+                    "initial_output_raw": initial_output_raw,
+                    "initial_output": evaluation["canonical"],
+                    "initial_output_class": evaluation["class"],
+                    "initial_output_valid": evaluation["valid"],
+                    "initial_output_validation_reason": evaluation["reason"],
+                    "initial_output_structural_kind": evaluation["structural_kind"],
+                }
+            )
 
     unload_model(tokenizer, model)
 

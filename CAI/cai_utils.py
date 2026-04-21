@@ -508,10 +508,12 @@ def load_generation_model(
     )
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
+    tokenizer.padding_side = "left"
+    tokenizer.truncation_side = "left"
 
     model_kwargs = {
         "token": hf_token,
-        "torch_dtype": get_dtype(dtype),
+        "dtype": get_dtype(dtype),
         "device_map": "auto",
         "trust_remote_code": trust_remote_code,
     }
@@ -589,6 +591,104 @@ def _prepare_inputs(tokenizer: Any, prompt: str, model_family: str, device: torc
     return batch
 
 
+def _prepare_batched_inputs(
+    tokenizer: Any,
+    prompts: List[str],
+    model_family: str,
+    device: torch.device,
+    max_prompt_length: Optional[int] = None,
+) -> Dict[str, torch.Tensor]:
+    tokenizer_kwargs: Dict[str, Any] = {
+        "return_tensors": "pt",
+        "add_special_tokens": False,
+        "padding": True,
+    }
+    if max_prompt_length is not None:
+        tokenizer_kwargs["truncation"] = True
+        tokenizer_kwargs["max_length"] = max_prompt_length
+    batch = tokenizer(prompts, **tokenizer_kwargs)
+    batch = {key: value.to(device) for key, value in batch.items()}
+    if model_family == "gemma" and "token_type_ids" not in batch:
+        batch["token_type_ids"] = torch.zeros_like(batch["input_ids"])
+    return batch
+
+
+def _build_generation_config(
+    *,
+    model: Any,
+    tokenizer: Any,
+    do_sample: bool,
+    max_new_tokens: int,
+    temperature: Optional[float],
+    top_p: Optional[float],
+) -> Any:
+    generation_config = copy.deepcopy(model.generation_config)
+    generation_config.do_sample = do_sample
+    generation_config.max_new_tokens = max_new_tokens
+    generation_config.pad_token_id = tokenizer.pad_token_id
+    generation_config.eos_token_id = tokenizer.eos_token_id
+    if do_sample:
+        generation_config.temperature = temperature if temperature is not None else 1.0
+        generation_config.top_p = top_p if top_p is not None else 1.0
+    else:
+        if hasattr(generation_config, "temperature"):
+            generation_config.temperature = None
+        if hasattr(generation_config, "top_p"):
+            generation_config.top_p = None
+        if hasattr(generation_config, "top_k"):
+            generation_config.top_k = None
+    return generation_config
+
+
+def generate_responses(
+    *,
+    model: Any,
+    tokenizer: Any,
+    prompts: List[str],
+    model_family: str,
+    max_new_tokens: int,
+    do_sample: bool,
+    temperature: Optional[float] = None,
+    top_p: Optional[float] = None,
+    seed: Optional[int] = None,
+    max_prompt_length: Optional[int] = None,
+) -> List[str]:
+    if not prompts:
+        return []
+
+    if seed is not None:
+        torch.manual_seed(seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(seed)
+
+    device = _model_device(model)
+    inputs = _prepare_batched_inputs(
+        tokenizer,
+        prompts,
+        model_family,
+        device,
+        max_prompt_length=max_prompt_length,
+    )
+    input_width = int(inputs["input_ids"].shape[1])
+    generation_config = _build_generation_config(
+        model=model,
+        tokenizer=tokenizer,
+        do_sample=do_sample,
+        max_new_tokens=max_new_tokens,
+        temperature=temperature,
+        top_p=top_p,
+    )
+
+    with torch.no_grad():
+        generated = model.generate(**inputs, generation_config=generation_config)
+
+    outputs: List[str] = []
+    for row_idx in range(len(prompts)):
+        new_tokens = generated[row_idx][input_width:]
+        outputs.append(tokenizer.decode(new_tokens, skip_special_tokens=True).strip())
+    return outputs
+
+
 def generate_response(
     *,
     model: Any,
@@ -601,37 +701,17 @@ def generate_response(
     top_p: Optional[float] = None,
     seed: Optional[int] = None,
 ) -> str:
-    if seed is not None:
-        torch.manual_seed(seed)
-        if torch.cuda.is_available():
-            torch.cuda.manual_seed_all(seed)
-
-    device = _model_device(model)
-    inputs = _prepare_inputs(tokenizer, prompt, model_family, device)
-    prompt_len = int(inputs["input_ids"].shape[1])
-    generation_config = copy.deepcopy(model.generation_config)
-    generation_config.do_sample = do_sample
-    if do_sample:
-        generation_config.temperature = temperature if temperature is not None else 1.0
-        generation_config.top_p = top_p if top_p is not None else 1.0
-    else:
-        if hasattr(generation_config, "temperature"):
-            generation_config.temperature = None
-        if hasattr(generation_config, "top_p"):
-            generation_config.top_p = None
-        if hasattr(generation_config, "top_k"):
-            generation_config.top_k = None
-    generation_kwargs: Dict[str, Any] = {
-        "max_new_tokens": max_new_tokens,
-        "pad_token_id": tokenizer.pad_token_id,
-        "eos_token_id": tokenizer.eos_token_id,
-        "generation_config": generation_config,
-    }
-
-    with torch.no_grad():
-        generated = model.generate(**inputs, **generation_kwargs)
-    new_tokens = generated[0][prompt_len:]
-    return tokenizer.decode(new_tokens, skip_special_tokens=True).strip()
+    return generate_responses(
+        model=model,
+        tokenizer=tokenizer,
+        prompts=[prompt],
+        model_family=model_family,
+        max_new_tokens=max_new_tokens,
+        do_sample=do_sample,
+        temperature=temperature,
+        top_p=top_p,
+        seed=seed,
+    )[0]
 
 
 def build_policy_prompt(model_family: str, row: Dict[str, Any]) -> str:

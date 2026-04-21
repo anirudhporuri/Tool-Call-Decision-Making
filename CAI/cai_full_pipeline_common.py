@@ -46,6 +46,11 @@ def env_flag(name: str, default: bool) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def env_int(name: str, default: int) -> int:
+    value = os.getenv(name)
+    return int(value) if value is not None else default
+
+
 def ensure_dir(path: Path) -> Path:
     path.mkdir(parents=True, exist_ok=True)
     return path
@@ -218,6 +223,10 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--hf-token", default=os.getenv("HF_TOKEN"))
     parser.add_argument("--dtype", default=os.getenv("DTYPE", "bfloat16"))
     parser.add_argument("--attn-implementation", default=os.getenv("ATTN_IMPL"))
+    parser.add_argument("--base-generation-batch-size", type=int, default=env_int("BASE_GENERATION_BATCH_SIZE", 2))
+    parser.add_argument("--critic-batch-size", type=int, default=env_int("CRITIC_BATCH_SIZE", 2))
+    parser.add_argument("--base-generation-max-prompt-length", type=int, default=env_int("BASE_GENERATION_MAX_PROMPT_LENGTH", 1024))
+    parser.add_argument("--critic-max-prompt-length", type=int, default=env_int("CRITIC_MAX_PROMPT_LENGTH", 1024))
     parser.add_argument("--critique-max-new-tokens", type=int, default=int(os.getenv("CRITIQUE_MAX_NEW_TOKENS", "256")))
     parser.add_argument("--judge-max-new-tokens", type=int, default=int(os.getenv("JUDGE_MAX_NEW_TOKENS", "128")))
     parser.add_argument("--pair-temperature", type=float, default=float(os.getenv("PAIR_TEMPERATURE", "0.9")))
@@ -300,6 +309,13 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         f"base_generation_load_in_4bit={args.base_generation_load_in_4bit} "
         f"critic_load_in_4bit={args.critic_load_in_4bit} "
         f"training_load_in_4bit={args.training_load_in_4bit}"
+    )
+    log(
+        "Batch routing: "
+        f"base_generation_batch_size={args.base_generation_batch_size} "
+        f"critic_batch_size={args.critic_batch_size} "
+        f"base_generation_max_prompt_length={args.base_generation_max_prompt_length} "
+        f"critic_max_prompt_length={args.critic_max_prompt_length}"
     )
 
     run_step("Python version", repo_root, [sys.executable, "--version"], env, [])
@@ -394,6 +410,10 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             str(sft_source),
             "--max-examples",
             str(full_sft_rows),
+            "--batch-size",
+            str(args.base_generation_batch_size),
+            "--max-prompt-length",
+            str(args.base_generation_max_prompt_length),
             *base_generation_flags,
         ],
         env=env,
@@ -422,6 +442,10 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             str(full_sft_rows),
             "--max-new-tokens",
             str(args.critique_max_new_tokens),
+            "--batch-size",
+            str(args.critic_batch_size),
+            "--max-prompt-length",
+            str(args.critic_max_prompt_length),
             *critic_generation_flags,
         ],
         env=env,
@@ -449,6 +473,10 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             f"outputs/{run_tag}/sft_critiques/critiques.jsonl",
             "--max-examples",
             str(full_sft_rows),
+            "--batch-size",
+            str(args.base_generation_batch_size),
+            "--max-prompt-length",
+            str(args.base_generation_max_prompt_length),
             *base_generation_flags,
         ],
         env=env,
@@ -547,6 +575,10 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             str(args.pair_top_p),
             "--candidate-attempts",
             str(args.pair_candidate_attempts),
+            "--batch-size",
+            str(args.base_generation_batch_size),
+            "--max-prompt-length",
+            str(args.base_generation_max_prompt_length),
             *base_generation_flags,
         ],
         env=env,
@@ -576,6 +608,10 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             str(full_dpo_rows),
             "--max-new-tokens",
             str(args.judge_max_new_tokens),
+            "--batch-size",
+            str(args.critic_batch_size),
+            "--max-prompt-length",
+            str(args.critic_max_prompt_length),
             *critic_generation_flags,
         ],
         env=env,
@@ -651,6 +687,10 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             str(args.pair_top_p),
             "--candidate-attempts",
             str(args.pair_candidate_attempts),
+            "--batch-size",
+            str(args.base_generation_batch_size),
+            "--max-prompt-length",
+            str(args.base_generation_max_prompt_length),
             *base_generation_flags,
         ],
         env=env,
@@ -680,6 +720,10 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             str(full_dpo_rows),
             "--max-new-tokens",
             str(args.judge_max_new_tokens),
+            "--batch-size",
+            str(args.critic_batch_size),
+            "--max-prompt-length",
+            str(args.critic_max_prompt_length),
             *critic_generation_flags,
         ],
         env=env,

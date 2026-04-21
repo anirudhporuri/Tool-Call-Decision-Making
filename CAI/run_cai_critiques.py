@@ -11,7 +11,7 @@ from cai_utils import (
     build_fallback_critique_text,
     critique_missing_fields,
     ensure_dir,
-    generate_response,
+    generate_responses,
     get_constitution,
     load_generation_model,
     load_jsonl,
@@ -58,6 +58,8 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--start-index", type=int, default=0)
     parser.add_argument("--max-examples", type=int, default=env_int("MAX_EXAMPLES", None))
     parser.add_argument("--max-new-tokens", type=int, default=env_int("CRITIQUE_MAX_NEW_TOKENS", 96))
+    parser.add_argument("--batch-size", type=int, default=env_int("BATCH_SIZE", 2))
+    parser.add_argument("--max-prompt-length", type=int, default=env_int("MAX_PROMPT_LENGTH", 1024))
     parser.add_argument("--dry-run", action="store_true", default=env_flag("DRY_RUN", False))
     parser.add_argument("--smoke-run", action="store_true", default=env_flag("SMOKE_RUN", False))
     parser.add_argument("--dry-run-max-examples", type=int, default=env_int("DRY_RUN_MAX_EXAMPLES", 8))
@@ -115,6 +117,8 @@ def summarize_records(records: List[Dict[str, Any]]) -> Dict[str, Any]:
 
 def main(argv: Optional[Sequence[str]] = None) -> None:
     args = parse_args(argv)
+    if args.batch_size < 1:
+        raise ValueError("--batch-size must be at least 1.")
     out_dir = ensure_dir(args.output_dir)
     save_json(out_dir / "run_config.json", sanitized_args_dict(args))
 
@@ -167,69 +171,58 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
 
     records: List[Dict[str, Any]] = []
     iterator = progress(
-        enumerate(zip(source_rows, initial_rows)),
-        total=len(source_rows),
+        range(0, len(source_rows), args.batch_size),
+        total=(len(source_rows) + args.batch_size - 1) // args.batch_size,
         desc=f"{args.critic_family} critiques",
         leave=False,
     )
-    for idx, (source_row, initial_row) in iterator:
-        assistant_response = initial_row.get("initial_output_raw") or initial_row["initial_output"]
-        critique_prompt = build_critique_prompt(
-            model_family=args.critic_family,
-            constitution=constitution,
-            user_request=source_row["user_request"],
-            tools=source_row["tools"],
-            assistant_response=assistant_response,
-            tokenizer=tokenizer,
-        )
-        first_raw = generate_response(
+    for start_idx in iterator:
+        batch_source_rows = source_rows[start_idx : start_idx + args.batch_size]
+        batch_initial_rows = initial_rows[start_idx : start_idx + args.batch_size]
+        prompts = []
+        for source_row, initial_row in zip(batch_source_rows, batch_initial_rows):
+            assistant_response = initial_row.get("initial_output_raw") or initial_row["initial_output"]
+            prompts.append(
+                build_critique_prompt(
+                    model_family=args.critic_family,
+                    constitution=constitution,
+                    user_request=source_row["user_request"],
+                    tools=source_row["tools"],
+                    assistant_response=assistant_response,
+                    tokenizer=tokenizer,
+                )
+            )
+        raw_critiques = generate_responses(
             model=model,
             tokenizer=tokenizer,
-            prompt=critique_prompt,
+            prompts=prompts,
             model_family=args.critic_family,
             max_new_tokens=args.max_new_tokens,
             do_sample=False,
-            seed=args.seed + idx,
+            seed=args.seed + start_idx,
+            max_prompt_length=args.max_prompt_length,
         )
-        critique_attempts = [first_raw]
-        parsed_attempts = [parse_critique_output(first_raw)]
-        if not parsed_attempts[-1]["valid"]:
-            retry_raw = generate_response(
-                model=model,
-                tokenizer=tokenizer,
-                prompt=critique_prompt,
-                model_family=args.critic_family,
-                max_new_tokens=args.max_new_tokens,
-                do_sample=False,
-                seed=args.seed + 1_000_000 + idx,
+        for source_row, first_raw in zip(batch_source_rows, raw_critiques):
+            parsed = parse_critique_output(first_raw)
+            fallback_used = not parsed["valid"]
+            effective_text = parsed["raw_text"] if parsed["raw_text"] else build_fallback_critique_text([first_raw], [parsed])
+            records.append(
+                {
+                    "example_id": source_row["example_id"],
+                    "source_row_index": source_row["source_row_index"],
+                    "source_split": source_row["source_split"],
+                    "chosen_behavior_class": source_row["chosen_behavior_class"],
+                    "critique": parsed,
+                    "critique_attempts": 1,
+                    "critique_first_try_valid": parsed["valid"],
+                    "critique_final_valid": parsed["valid"],
+                    "critique_invalid_attempts": 0 if parsed["valid"] else 1,
+                    "critique_missing_fields_by_attempt": [critique_missing_fields(parsed)],
+                    "critique_all_attempts_raw": [first_raw],
+                    "critique_fallback_used": fallback_used,
+                    "critique_effective_text": effective_text,
+                }
             )
-            critique_attempts.append(retry_raw)
-            parsed_attempts.append(parse_critique_output(retry_raw))
-
-        parsed = parsed_attempts[-1] if parsed_attempts[-1]["valid"] else parsed_attempts[0]
-        fallback_used = not any(attempt["valid"] for attempt in parsed_attempts)
-        effective_text = (
-            parsed["raw_text"]
-            if not fallback_used
-            else build_fallback_critique_text(critique_attempts, parsed_attempts)
-        )
-        records.append(
-            {
-                "example_id": source_row["example_id"],
-                "source_row_index": source_row["source_row_index"],
-                "source_split": source_row["source_split"],
-                "chosen_behavior_class": source_row["chosen_behavior_class"],
-                "critique": parsed,
-                "critique_attempts": len(critique_attempts),
-                "critique_first_try_valid": parsed_attempts[0]["valid"],
-                "critique_final_valid": any(attempt["valid"] for attempt in parsed_attempts),
-                "critique_invalid_attempts": sum(1 for attempt in parsed_attempts if not attempt["valid"]),
-                "critique_missing_fields_by_attempt": [critique_missing_fields(attempt) for attempt in parsed_attempts],
-                "critique_all_attempts_raw": critique_attempts,
-                "critique_fallback_used": fallback_used,
-                "critique_effective_text": effective_text,
-            }
-        )
 
     unload_model(tokenizer, model)
 

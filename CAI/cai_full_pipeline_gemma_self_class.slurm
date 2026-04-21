@@ -5,7 +5,7 @@
 #SBATCH --partition=class
 #SBATCH --account=class
 #SBATCH --qos=default
-#SBATCH --time=24:00:00
+#SBATCH --time=60:00:00
 #SBATCH --mem=32g
 #SBATCH --gres=gpu:1
 
@@ -33,6 +33,10 @@ python3 -u "${REPO_ROOT}/CAI/cai_full_pipeline_common.py" \
   --critic-model "${GEMMA_BASE_MODEL}" \
   --critic-family "gemma" \
   --critic-tag "self" \
+  --base-generation-batch-size 2 \
+  --critic-batch-size 2 \
+  --base-generation-max-prompt-length 1792 \
+  --critic-max-prompt-length 1792 \
   --no-base-generation-load-in-4bit \
   --no-critic-load-in-4bit \
   --training-load-in-4bit \

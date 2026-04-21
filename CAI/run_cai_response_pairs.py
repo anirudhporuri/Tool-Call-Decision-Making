@@ -10,7 +10,7 @@ from cai_utils import (
     build_policy_prompt,
     ensure_dir,
     evaluate_candidate_response,
-    generate_response,
+    generate_responses,
     load_generation_model,
     progress,
     save_json,
@@ -58,6 +58,8 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--start-index", type=int, default=0)
     parser.add_argument("--max-examples", type=int, default=env_int("MAX_EXAMPLES", None))
     parser.add_argument("--max-new-tokens", type=int, default=env_int("POLICY_MAX_NEW_TOKENS", 256))
+    parser.add_argument("--batch-size", type=int, default=env_int("BATCH_SIZE", 2))
+    parser.add_argument("--max-prompt-length", type=int, default=env_int("MAX_PROMPT_LENGTH", 1024))
     parser.add_argument("--temperature", type=float, default=env_float("POLICY_TEMPERATURE", 0.9))
     parser.add_argument("--top-p", type=float, default=env_float("POLICY_TOP_P", 0.95))
     parser.add_argument(
@@ -118,44 +120,12 @@ def summarize_records(records: List[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
-def sample_candidate(
-    *,
-    model: Any,
-    tokenizer: Any,
-    prompt: str,
-    model_family: str,
-    max_new_tokens: int,
-    temperature: float,
-    top_p: float,
-    seed: int,
-    tools: Any,
-) -> Dict[str, Any]:
-    response_raw = generate_response(
-        model=model,
-        tokenizer=tokenizer,
-        prompt=prompt,
-        model_family=model_family,
-        max_new_tokens=max_new_tokens,
-        do_sample=True,
-        temperature=temperature,
-        top_p=top_p,
-        seed=seed,
-    )
-    evaluation = evaluate_candidate_response(response_raw, tools)
-    return {
-        "raw": response_raw,
-        "canonical": evaluation["canonical"],
-        "class": evaluation["class"],
-        "valid": evaluation["valid"],
-        "validation_reason": evaluation["reason"],
-        "structural_kind": evaluation["structural_kind"],
-    }
-
-
 def main(argv: Optional[Sequence[str]] = None) -> None:
     args = parse_args(argv)
     if args.candidate_attempts < 2:
         raise ValueError("--candidate-attempts must be at least 2.")
+    if args.batch_size < 1:
+        raise ValueError("--batch-size must be at least 1.")
     out_dir = ensure_dir(args.output_dir)
     save_json(out_dir / "run_config.json", sanitized_args_dict(args))
 
@@ -206,39 +176,76 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         trust_remote_code=args.trust_remote_code,
     )
 
-    records: List[Dict[str, Any]] = []
-    iterator = progress(
-        enumerate(source_rows),
-        total=len(source_rows),
-        desc=f"{args.policy_family} response pairs",
+    states: List[Dict[str, Any]] = []
+    for idx, row in enumerate(source_rows):
+        states.append(
+            {
+                "row_index": idx,
+                "row": row,
+                "prompt": build_policy_prompt(args.policy_family, row),
+                "sampled_candidates": [],
+                "distinct_candidates": [],
+                "seen_canonicals": set(),
+            }
+        )
+
+    attempt_iterator = progress(
+        range(args.candidate_attempts),
+        total=args.candidate_attempts,
+        desc=f"{args.policy_family} response pair attempts",
         leave=False,
     )
-    for idx, row in iterator:
-        policy_prompt = build_policy_prompt(args.policy_family, row)
-        sampled_candidates: List[Dict[str, Any]] = []
-        distinct_candidates: List[Dict[str, Any]] = []
-        seen_canonicals = set()
-        seed_base = args.seed + (idx * args.candidate_attempts)
-        for attempt_idx in range(args.candidate_attempts):
-            candidate = sample_candidate(
+    for attempt_idx in attempt_iterator:
+        active_state_indices = [
+            idx for idx, state in enumerate(states) if len(state["distinct_candidates"]) < 2
+        ]
+        if not active_state_indices:
+            break
+        batch_iterator = progress(
+            range(0, len(active_state_indices), args.batch_size),
+            total=(len(active_state_indices) + args.batch_size - 1) // args.batch_size,
+            desc=f"{args.policy_family} response pair batches",
+            leave=False,
+        )
+        for batch_start in batch_iterator:
+            state_index_batch = active_state_indices[batch_start : batch_start + args.batch_size]
+            prompt_batch = [states[state_idx]["prompt"] for state_idx in state_index_batch]
+            raw_outputs = generate_responses(
                 model=model,
                 tokenizer=tokenizer,
-                prompt=policy_prompt,
+                prompts=prompt_batch,
                 model_family=args.policy_family,
                 max_new_tokens=args.max_new_tokens,
+                do_sample=True,
                 temperature=args.temperature,
                 top_p=args.top_p,
-                seed=seed_base + attempt_idx,
-                tools=row["tools"],
+                seed=args.seed + (attempt_idx * 100_000) + batch_start,
+                max_prompt_length=args.max_prompt_length,
             )
-            sampled_candidates.append(candidate)
-            canonical_key = candidate["canonical"]
-            if canonical_key not in seen_canonicals:
-                seen_canonicals.add(canonical_key)
-                distinct_candidates.append(candidate)
-            if len(distinct_candidates) >= 2:
-                break
+            for state_idx, response_raw in zip(state_index_batch, raw_outputs):
+                state = states[state_idx]
+                evaluation = evaluate_candidate_response(response_raw, state["row"]["tools"])
+                candidate = {
+                    "raw": response_raw,
+                    "canonical": evaluation["canonical"],
+                    "class": evaluation["class"],
+                    "valid": evaluation["valid"],
+                    "validation_reason": evaluation["reason"],
+                    "structural_kind": evaluation["structural_kind"],
+                }
+                state["sampled_candidates"].append(candidate)
+                canonical_key = candidate["canonical"]
+                if canonical_key not in state["seen_canonicals"]:
+                    state["seen_canonicals"].add(canonical_key)
+                    state["distinct_candidates"].append(candidate)
 
+    records: List[Dict[str, Any]] = []
+    for state in states:
+        row = state["row"]
+        sampled_candidates = state["sampled_candidates"]
+        distinct_candidates = state["distinct_candidates"]
+        if not sampled_candidates:
+            raise RuntimeError(f"No sampled candidates were generated for example_id={row['example_id']}.")
         response_a = distinct_candidates[0] if distinct_candidates else sampled_candidates[0]
         response_b = distinct_candidates[1] if len(distinct_candidates) >= 2 else sampled_candidates[-1]
         records.append(
