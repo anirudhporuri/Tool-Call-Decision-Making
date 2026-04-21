@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=cai_full_gemma
+#SBATCH --job-name=cai_gemma_self
 #SBATCH --output=%x.%j.out
 #SBATCH --error=%x.%j.err
 #SBATCH --partition=class
@@ -9,12 +9,11 @@
 #SBATCH --mem=32g
 #SBATCH --gres=gpu:1
 
-# Generic Gemma full-pipeline entrypoint.
-# Preferred explicit wrappers:
+# Gemma full pipeline with self-critiques and self-judging.
+# Submit with:
 #   sbatch cai_full_pipeline_gemma_self_class.slurm
-#   sbatch cai_full_pipeline_gemma_qwen_class.slurm
-#
-# This generic wrapper currently matches the qwen-judge mode.
+# Optional overrides still work, for example:
+#   HF_TOKEN=... sbatch cai_full_pipeline_gemma_self_class.slurm --no-skip-completed
 
 set -euo pipefail
 
@@ -31,10 +30,10 @@ python3 -u "${REPO_ROOT}/CAI/cai_full_pipeline_common.py" \
   --base-model "${GEMMA_BASE_MODEL}" \
   --base-family "gemma" \
   --base-tag "gemma" \
-  --critic-model "Qwen/Qwen3.5-9B" \
-  --critic-family "qwen" \
-  --critic-tag "qwen3p5_9b" \
-  --base-generation-load-in-4bit \
-  --critic-load-in-4bit \
+  --critic-model "${GEMMA_BASE_MODEL}" \
+  --critic-family "gemma" \
+  --critic-tag "self" \
+  --no-base-generation-load-in-4bit \
+  --no-critic-load-in-4bit \
   --training-load-in-4bit \
   "$@"

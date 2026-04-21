@@ -1,134 +1,114 @@
-# Constitutional AI pipeline
+# Constitutional AI Pipeline
 
-This folder contains a local, no-API Constitutional AI workflow for the tool-calling setup in this repo.
+This directory now supports the staged Constitutional AI workflow only. The older monolithic CAI data generators have been removed so the repo matches the pipeline we actually run on cluster.
 
-The recommended pipeline is now stage-based:
+The staged flow is:
 
-1. Split the balanced SFT source JSONL into balanced CAI source halves
-2. Generate initial policy outputs on the SFT split and/or DPO split
-3. Generate constitution-guided critiques with a pluggable critic model
-4. Generate revisions with a pluggable revision model
-5. Build the final CAI-SFT dataset
-6. Generate DPO response pairs
-7. Judge the DPO pairs and directly build the final CAI-DPO dataset
-8. Train CAI-SFT / CAI-DPO models with the existing post-training baseline
-9. Evaluate the resulting adapters with the existing 0-shot prompting eval
+1. Split the balanced source set into CAI SFT and CAI DPO halves
+2. Generate initial outputs
+3. Generate critiques
+4. Generate revisions
+5. Build the CAI SFT dataset
+6. Train and evaluate the CAI SFT adapter
+7. Generate DPO response pairs
+8. Judge those pairs and build the CAI DPO dataset
+9. Train and evaluate DPO adapters from the base model and from the SFT adapter
 
-This makes it easy to mix:
-- a student policy model for initial outputs / revisions / pair generation
-- a larger critic model for critiques and DPO judging
+`cai_full_pipeline_common.py` already supports resume-friendly reruns through `--skip-completed`, which is on by default. If a batch job dies mid-run, rerunning the same wrapper will skip stages whose expected artifacts are already complete.
 
-The CAI generation steps still reuse the repo's zero-shot tool-use prompt family through `w2c_train_format.py`.
+## Supported Full-Pipeline Modes
 
-## Files
+The preferred full-pipeline entrypoints are:
 
-- `Constitution.txt`: full constitution
-- `critique_prompt.txt`, `revision_prompt.txt`, `preference_prompt.txt`: CAI prompt templates
-- `run_cai_split.py`: balanced 50/50 CAI source split, defaulting to `Data_Management/generated_datasets/when2call_balanced_sft.jsonl`
-- `run_cai_initial_outputs.py`: generate one policy output per source row
-- `run_cai_critiques.py`: generate critiques for a set of initial outputs
-- `run_cai_revisions.py`: generate revised outputs from critiques
-- `build_cai_sft_dataset.py`: build the final CAI-SFT dataset from initial outputs + critiques + revisions
-- `run_cai_response_pairs.py`: generate DPO response pairs
-- `run_cai_preferences.py`: judge response pairs and directly build the final CAI-DPO dataset
-- `run_cai_sft_data.py`, `run_cai_dpo_data.py`: older monolithic generators kept for reference
-- `*.sh`: thin shell wrappers
-- `*.slurm`: class-account batch launchers for data-generation stages
+- `cai_full_pipeline_gemma_self_class.slurm`
+- `cai_full_pipeline_gemma_qwen_class.slurm`
+- `cai_full_pipeline_llama_self_class.slurm`
+- `cai_full_pipeline_llama_qwen_class.slurm`
 
-## Local examples
+These correspond to:
+
+- Gemma self-judge
+- Gemma qwen-judge
+- Llama self-judge
+- Llama qwen-judge
+
+The generic wrappers remain available:
+
+- `cai_full_pipeline_gemma_class.slurm`
+- `cai_full_pipeline_llama_class.slurm`
+
+They currently map to the qwen-judge configuration.
+
+## Precision Policy
+
+The full pipeline now routes precision separately for three parts of the run:
+
+- base-generation stages
+  - `run_cai_initial_outputs.py`
+  - `run_cai_revisions.py`
+  - `run_cai_response_pairs.py`
+- critic/judge stages
+  - `run_cai_critiques.py`
+  - `run_cai_preferences.py`
+- training stages
+  - `run_sft.py`
+  - `run_dpo.py`
+
+Current defaults by wrapper:
+
+- self-judge wrappers
+  - base-generation: normal precision
+  - critic/judge: normal precision
+  - training: 4-bit
+- qwen-judge wrappers
+  - base-generation: 4-bit
+  - critic/judge: 4-bit
+  - training: 4-bit
+
+This keeps self-judge runs closer to the original model-loading setup while preserving the memory-saving post-training path we already use for SFT and DPO.
+
+## Model Locations
+
+Gemma base model:
+
+- `/fs/class-projects/spring2026/cmsc848q/mukunds/google__gemma-3-4b-it`
+
+Llama base model:
+
+- `meta-llama/Llama-3.2-3B-Instruct`
+
+Qwen critic/judge:
+
+- `Qwen/Qwen3.5-9B`
+
+Qwen is supported here only through the existing Transformers + bitsandbytes runtime 4-bit path. GGUF / Q4_K_M integration is not part of this pipeline refresh.
+
+## Key Files
+
+- `run_cai_split.py`: balanced CAI source split
+- `run_cai_initial_outputs.py`: one initial policy output per source row
+- `run_cai_critiques.py`: constitution-guided critiques
+- `run_cai_revisions.py`: revised outputs from critiques
+- `build_cai_sft_dataset.py`: final CAI SFT dataset builder
+- `run_cai_response_pairs.py`: DPO pair generation
+- `run_cai_preferences.py`: DPO pair judging and final dataset export
+- `cai_full_pipeline_common.py`: staged cluster driver with skip-completed behavior
+
+## Typical Cluster Runs
+
+From the `CAI/` directory:
 
 ```bash
-cd CAI
-
-# 1. Prepare balanced source halves
-python3 run_cai_split.py
-
-# 2. Generate initial SFT outputs with the student policy model
-python3 run_cai_initial_outputs.py \
-  google/gemma-3-4b-it \
-  gemma \
-  outputs/gemma_sft_initial \
-  generated_datasets/train_pref_cai_sft_source.jsonl
-
-# 3. Critique those outputs with a stronger critic model
-python3 run_cai_critiques.py \
-  Qwen/Qwen2.5-7B-Instruct \
-  qwen \
-  outputs/gemma_sft_critiques \
-  generated_datasets/train_pref_cai_sft_source.jsonl \
-  outputs/gemma_sft_initial/initial_outputs.jsonl
-
-# 4. Revise with the student policy model (or swap in another reviser)
-python3 run_cai_revisions.py \
-  google/gemma-3-4b-it \
-  gemma \
-  outputs/gemma_sft_revisions \
-  generated_datasets/train_pref_cai_sft_source.jsonl \
-  outputs/gemma_sft_initial/initial_outputs.jsonl \
-  outputs/gemma_sft_critiques/critiques.jsonl
-
-# 5. Build the final CAI-SFT dataset
-python3 build_cai_sft_dataset.py \
-  outputs/gemma_cai_sft_dataset \
-  generated_datasets/train_pref_cai_sft_source.jsonl \
-  outputs/gemma_sft_initial/initial_outputs.jsonl \
-  outputs/gemma_sft_critiques/critiques.jsonl \
-  outputs/gemma_sft_revisions/revisions.jsonl
-
-# 6. Train the CAI-SFT model
-cd ../Post-Training\ Baselines
-python3 run_sft.py google/gemma-3-4b-it gemma outputs/gemma_cai_sft ../CAI/outputs/gemma_cai_sft_dataset/cai_sft_dataset.jsonl
-
-# 7. Generate DPO response pairs from the base or SFT policy model
-cd ../CAI
-python3 run_cai_response_pairs.py \
-  ../Post-Training\ Baselines/outputs/gemma_cai_sft_self \
-  gemma \
-  outputs/gemma_dpo_pairs \
-  generated_datasets/train_pref_cai_dpo_source.jsonl
-
-# 8. Judge the pairs and directly build the DPO dataset
-python3 run_cai_preferences.py \
-  Qwen/Qwen2.5-7B-Instruct \
-  qwen \
-  outputs/gemma_cai_dpo_dataset \
-  generated_datasets/train_pref_cai_dpo_source.jsonl \
-  outputs/gemma_dpo_pairs/response_pairs.jsonl
-
-# 9. Train CAI-DPO
-cd ../Post-Training\ Baselines
-python3 run_dpo.py ../Post-Training\ Baselines/outputs/gemma_cai_sft gemma outputs/gemma_cai_dpo ../CAI/outputs/gemma_cai_dpo_dataset/cai_dpo_dataset.jsonl
+sbatch cai_full_pipeline_gemma_self_class.slurm
+sbatch cai_full_pipeline_gemma_qwen_class.slurm
+HF_TOKEN="..." sbatch cai_full_pipeline_llama_self_class.slurm
+HF_TOKEN="..." sbatch cai_full_pipeline_llama_qwen_class.slurm
 ```
 
-## Colab sketch
+To force a stage to rerun instead of resuming:
 
-```python
-%cd /content/Tool-Call-Decision-Making/CAI
-!python3 -u run_cai_split.py
-
-%cd /content/Tool-Call-Decision-Making/CAI
-!python3 -u run_cai_initial_outputs.py google/gemma-3-4b-it gemma outputs/gemma_sft_initial generated_datasets/train_pref_cai_sft_source.jsonl
-
-%cd /content/Tool-Call-Decision-Making/CAI
-!python3 -u run_cai_critiques.py Qwen/Qwen2.5-7B-Instruct qwen outputs/gemma_sft_critiques generated_datasets/train_pref_cai_sft_source.jsonl outputs/gemma_sft_initial/initial_outputs.jsonl
-
-%cd /content/Tool-Call-Decision-Making/CAI
-!python3 -u run_cai_revisions.py google/gemma-3-4b-it gemma outputs/gemma_sft_revisions generated_datasets/train_pref_cai_sft_source.jsonl outputs/gemma_sft_initial/initial_outputs.jsonl outputs/gemma_sft_critiques/critiques.jsonl
-
-%cd /content/Tool-Call-Decision-Making/CAI
-!python3 -u build_cai_sft_dataset.py outputs/gemma_cai_sft_dataset generated_datasets/train_pref_cai_sft_source.jsonl outputs/gemma_sft_initial/initial_outputs.jsonl outputs/gemma_sft_critiques/critiques.jsonl outputs/gemma_sft_revisions/revisions.jsonl
-
-%cd /content/Tool-Call-Decision-Making/Post-Training\ Baselines
-!python3 -u run_sft.py google/gemma-3-4b-it gemma outputs/gemma_cai_sft ../CAI/outputs/gemma_cai_sft_dataset/cai_sft_dataset.jsonl
-
-%cd /content/Tool-Call-Decision-Making/CAI
-!python3 -u run_cai_response_pairs.py /content/Tool-Call-Decision-Making/Post-Training\ Baselines/outputs/gemma_cai_sft gemma outputs/gemma_dpo_pairs generated_datasets/train_pref_cai_dpo_source.jsonl
-
-%cd /content/Tool-Call-Decision-Making/CAI
-!python3 -u run_cai_preferences.py Qwen/Qwen2.5-7B-Instruct qwen outputs/gemma_cai_dpo_dataset generated_datasets/train_pref_cai_dpo_source.jsonl outputs/gemma_dpo_pairs/response_pairs.jsonl
-
-%cd /content/Tool-Call-Decision-Making/Post-Training\ Baselines
-!python3 -u run_dpo.py /content/Tool-Call-Decision-Making/Post-Training\ Baselines/outputs/gemma_cai_sft gemma outputs/gemma_cai_dpo ../CAI/outputs/gemma_cai_dpo_dataset/cai_dpo_dataset.jsonl
+```bash
+sbatch cai_full_pipeline_gemma_self_class.slurm --no-skip-completed
 ```
 
-All final evals should use the existing prompting baseline in 0-shot mode.
+All final evaluation still goes through the prompting-baseline evaluation path in 0-shot mode.

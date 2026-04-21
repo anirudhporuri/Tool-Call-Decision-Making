@@ -68,6 +68,12 @@ def local_or_cached_model_path(model_name_or_path: str, cache_root: Path, hf_tok
         log(f"Model already available locally: {resolved}")
         return resolved
 
+    if candidate.is_absolute():
+        raise FileNotFoundError(
+            "Model path does not exist on disk: "
+            f"{candidate}. If this is meant to be a local checkpoint, verify the directory name/path."
+        )
+
     local_dir = ensure_dir(cache_root / sanitize_model_name(model_name_or_path))
     if any(local_dir.iterdir()):
         resolved = str(local_dir.resolve())
@@ -85,6 +91,29 @@ def local_or_cached_model_path(model_name_or_path: str, cache_root: Path, hf_tok
         resume_download=True,
     )
     return str(local_dir.resolve())
+
+
+def resolve_model_reference(
+    model_name_or_path: str,
+    cache_root: Path,
+    hf_token: Optional[str],
+    prefetch_models: bool,
+) -> str:
+    candidate = Path(model_name_or_path).expanduser()
+    if candidate.exists():
+        resolved = str(candidate.resolve())
+        log(f"Model already available locally: {resolved}")
+        return resolved
+
+    if candidate.is_absolute():
+        raise FileNotFoundError(
+            "Model path does not exist on disk: "
+            f"{candidate}. If this is meant to be a local checkpoint, verify the directory name/path."
+        )
+
+    if prefetch_models:
+        return local_or_cached_model_path(model_name_or_path, cache_root, hf_token)
+    return model_name_or_path
 
 
 def build_launcher(mode: str) -> List[str]:
@@ -109,10 +138,6 @@ def run_step(label: str, workdir: Path, command: Sequence[str], env: dict[str, s
 def count_lines(path: Path) -> int:
     with path.open("r", encoding="utf-8") as handle:
         return sum(1 for line in handle if line.strip())
-
-
-def file_exists(path: Path) -> bool:
-    return path.is_file()
 
 
 def jsonl_has_rows(path: Path, min_rows: int = 1) -> bool:
@@ -155,16 +180,36 @@ def add_bool_flag(parser: argparse.ArgumentParser, name: str, default: bool, hel
     parser.add_argument(f"--no-{name[2:]}", dest=dest, action="store_false", help=argparse.SUPPRESS)
 
 
+def build_model_flags(
+    *,
+    load_in_4bit: bool,
+    trust_remote_code: bool,
+    dtype: Optional[str],
+    attn_implementation: Optional[str],
+    hf_token: Optional[str],
+) -> List[str]:
+    flags: List[str] = []
+    if load_in_4bit:
+        flags.append("--load-in-4bit")
+    if trust_remote_code:
+        flags.append("--trust-remote-code")
+    maybe_extend(flags, "--dtype", dtype)
+    maybe_extend(flags, "--attn-implementation", attn_implementation)
+    if hf_token:
+        flags.extend(["--hf-token", hf_token])
+    return flags
+
+
 def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Run the full CAI -> SFT -> Eval -> DPO pipeline on the cluster.",
+        description="Run the full staged CAI -> SFT -> Eval -> DPO pipeline on the cluster.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument("--base-model", required=True)
     parser.add_argument("--base-family", required=True, choices=["llama", "gemma"])
     parser.add_argument("--base-tag", required=True)
     parser.add_argument("--critic-model", default=os.getenv("CRITIC_MODEL", "Qwen/Qwen3.5-9B"))
-    parser.add_argument("--critic-family", default=os.getenv("CRITIC_FAMILY", "qwen"))
+    parser.add_argument("--critic-family", default=os.getenv("CRITIC_FAMILY", "qwen"), choices=["llama", "gemma", "qwen", "gpt-oss"])
     parser.add_argument("--critic-tag", default=os.getenv("CRITIC_TAG", "qwen3p5_9b"))
     parser.add_argument("--run-tag", default=os.getenv("RUN_TAG"))
     parser.add_argument("--sft-model-tag", default=os.getenv("SFT_MODEL_TAG"))
@@ -181,10 +226,35 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--eval-num-shots", type=int, default=int(os.getenv("EVAL_NUM_SHOTS", "0")))
     parser.add_argument("--launcher", choices=["auto", "srun", "direct"], default=os.getenv("W2C_LAUNCHER", "auto"))
     add_bool_flag(parser, "--prefetch-models", env_flag("PREFETCH_MODELS", True), "Snapshot base and critic models into the local cache before running.")
-    add_bool_flag(parser, "--load-in-4bit", env_flag("LOAD_IN_4BIT", True), "Load generation and training models in 4-bit where supported.")
+    add_bool_flag(
+        parser,
+        "--base-generation-load-in-4bit",
+        env_flag("BASE_GENERATION_LOAD_IN_4BIT", env_flag("LOAD_IN_4BIT", True)),
+        "Load the base model in 4-bit for initial outputs, revisions, and DPO pair generation.",
+    )
+    add_bool_flag(
+        parser,
+        "--critic-load-in-4bit",
+        env_flag("CRITIC_LOAD_IN_4BIT", env_flag("LOAD_IN_4BIT", True)),
+        "Load the critic/judge model in 4-bit for SFT critiques and DPO judging.",
+    )
+    add_bool_flag(
+        parser,
+        "--training-load-in-4bit",
+        env_flag("TRAINING_LOAD_IN_4BIT", env_flag("LOAD_IN_4BIT", True)),
+        "Load the SFT/DPO training base model in 4-bit.",
+    )
     add_bool_flag(parser, "--skip-completed", env_flag("SKIP_COMPLETED", True), "Skip pipeline stages whose expected output artifacts already exist.")
     add_bool_flag(parser, "--trust-remote-code", env_flag("TRUST_REMOTE_CODE", False), "Allow custom model code in Transformers.")
-    return parser.parse_args(argv)
+    parser.add_argument("--load-in-4bit", dest="legacy_load_in_4bit", action="store_true", default=None, help=argparse.SUPPRESS)
+    parser.add_argument("--no-load-in-4bit", dest="legacy_load_in_4bit", action="store_false", help=argparse.SUPPRESS)
+
+    args = parser.parse_args(argv)
+    if args.legacy_load_in_4bit is not None:
+        args.base_generation_load_in_4bit = args.legacy_load_in_4bit
+        args.critic_load_in_4bit = args.legacy_load_in_4bit
+        args.training_load_in_4bit = args.legacy_load_in_4bit
+    return args
 
 
 def main(argv: Optional[Sequence[str]] = None) -> None:
@@ -215,21 +285,39 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
 
     launcher = build_launcher(args.launcher)
 
-    log(f"Job info: id={os.getenv('SLURM_JOB_ID', 'none')} name={os.getenv('SLURM_JOB_NAME', 'none')} host={socket.gethostname()}")
+    log(
+        "Job info: "
+        f"id={os.getenv('SLURM_JOB_ID', 'none')} "
+        f"name={os.getenv('SLURM_JOB_NAME', 'none')} "
+        f"host={socket.gethostname()}"
+    )
     log(f"Repository root: {repo_root}")
     log(f"Source JSONL: {source_jsonl}")
     log(f"Model cache dir: {model_cache_dir}")
     log(f"HF_HOME dir: {hf_home_dir}")
+    log(
+        "Precision routing: "
+        f"base_generation_load_in_4bit={args.base_generation_load_in_4bit} "
+        f"critic_load_in_4bit={args.critic_load_in_4bit} "
+        f"training_load_in_4bit={args.training_load_in_4bit}"
+    )
 
     run_step("Python version", repo_root, [sys.executable, "--version"], env, [])
     if shutil.which("nvidia-smi"):
         run_step("GPU status", repo_root, ["nvidia-smi"], env, [])
 
-    base_model_path = args.base_model
-    critic_model_path = args.critic_model
-    if args.prefetch_models:
-        base_model_path = local_or_cached_model_path(args.base_model, model_cache_dir, args.hf_token)
-        critic_model_path = local_or_cached_model_path(args.critic_model, model_cache_dir, args.hf_token)
+    base_model_path = resolve_model_reference(
+        args.base_model,
+        model_cache_dir,
+        args.hf_token,
+        args.prefetch_models,
+    )
+    critic_model_path = resolve_model_reference(
+        args.critic_model,
+        model_cache_dir,
+        args.hf_token,
+        args.prefetch_models,
+    )
 
     log(f"Base model path: {base_model_path}")
     log(f"Critic model path: {critic_model_path}")
@@ -260,15 +348,35 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     log(f"SFT source rows: {full_sft_rows}")
     log(f"DPO source rows: {full_dpo_rows}")
 
-    common_generation_flags: List[str] = []
-    if args.load_in_4bit:
-        common_generation_flags.append("--load-in-4bit")
+    base_generation_flags = build_model_flags(
+        load_in_4bit=args.base_generation_load_in_4bit,
+        trust_remote_code=args.trust_remote_code,
+        dtype=args.dtype,
+        attn_implementation=args.attn_implementation,
+        hf_token=args.hf_token,
+    )
+    critic_generation_flags = build_model_flags(
+        load_in_4bit=args.critic_load_in_4bit,
+        trust_remote_code=args.trust_remote_code,
+        dtype=args.dtype,
+        attn_implementation=args.attn_implementation,
+        hf_token=args.hf_token,
+    )
+    training_flags = build_model_flags(
+        load_in_4bit=args.training_load_in_4bit,
+        trust_remote_code=args.trust_remote_code,
+        dtype=args.dtype,
+        attn_implementation=args.attn_implementation,
+        hf_token=args.hf_token,
+    )
+
+    eval_flags: List[str] = []
     if args.trust_remote_code:
-        common_generation_flags.append("--trust-remote-code")
-    maybe_extend(common_generation_flags, "--dtype", args.dtype)
-    maybe_extend(common_generation_flags, "--attn-implementation", args.attn_implementation)
+        eval_flags.append("--trust-remote-code")
+    maybe_extend(eval_flags, "--dtype", args.dtype)
+    maybe_extend(eval_flags, "--attn-implementation", args.attn_implementation)
     if args.hf_token:
-        common_generation_flags.extend(["--hf-token", args.hf_token])
+        eval_flags.extend(["--hf-token", args.hf_token])
 
     sft_initial_jsonl = cai_dir / "outputs" / run_tag / "sft_initial" / "initial_outputs.jsonl"
     sft_initial_summary = cai_dir / "outputs" / run_tag / "sft_initial" / "summary.json"
@@ -286,7 +394,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             str(sft_source),
             "--max-examples",
             str(full_sft_rows),
-            *common_generation_flags,
+            *base_generation_flags,
         ],
         env=env,
         launcher=launcher,
@@ -314,7 +422,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             str(full_sft_rows),
             "--max-new-tokens",
             str(args.critique_max_new_tokens),
-            *common_generation_flags,
+            *critic_generation_flags,
         ],
         env=env,
         launcher=launcher,
@@ -341,7 +449,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             f"outputs/{run_tag}/sft_critiques/critiques.jsonl",
             "--max-examples",
             str(full_sft_rows),
-            *common_generation_flags,
+            *base_generation_flags,
         ],
         env=env,
         launcher=launcher,
@@ -375,16 +483,6 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     )
     log(f"CAI SFT dataset rows: {count_lines(sft_dataset_jsonl)}")
 
-    training_flags: List[str] = []
-    if args.load_in_4bit:
-        training_flags.append("--load-in-4bit")
-    if args.trust_remote_code:
-        training_flags.append("--trust-remote-code")
-    maybe_extend(training_flags, "--dtype", args.dtype)
-    maybe_extend(training_flags, "--attn-implementation", args.attn_implementation)
-    if args.hf_token:
-        training_flags.extend(["--hf-token", args.hf_token])
-
     sft_adapter_dir = pt_dir / "outputs" / sft_model_tag
     run_step_if_needed(
         skip_completed=args.skip_completed,
@@ -405,14 +503,6 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         is_complete=lambda: all_paths_exist([sft_adapter_dir / "adapter_config.json", sft_adapter_dir / "tokenizer_config.json"]),
         completion_note=f"found adapter_config.json in {sft_adapter_dir.name}",
     )
-
-    eval_flags: List[str] = []
-    if args.trust_remote_code:
-        eval_flags.append("--trust-remote-code")
-    maybe_extend(eval_flags, "--dtype", args.dtype)
-    maybe_extend(eval_flags, "--attn-implementation", args.attn_implementation)
-    if args.hf_token:
-        eval_flags.extend(["--hf-token", args.hf_token])
 
     sft_eval_dir = eval_dir / "outputs" / f"{sft_model_tag}_eval"
     run_step_if_needed(
@@ -457,7 +547,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             str(args.pair_top_p),
             "--candidate-attempts",
             str(args.pair_candidate_attempts),
-            *common_generation_flags,
+            *base_generation_flags,
         ],
         env=env,
         launcher=launcher,
@@ -486,7 +576,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             str(full_dpo_rows),
             "--max-new-tokens",
             str(args.judge_max_new_tokens),
-            *common_generation_flags,
+            *critic_generation_flags,
         ],
         env=env,
         launcher=launcher,
@@ -561,7 +651,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             str(args.pair_top_p),
             "--candidate-attempts",
             str(args.pair_candidate_attempts),
-            *common_generation_flags,
+            *base_generation_flags,
         ],
         env=env,
         launcher=launcher,
@@ -590,7 +680,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             str(full_dpo_rows),
             "--max-new-tokens",
             str(args.judge_max_new_tokens),
-            *common_generation_flags,
+            *critic_generation_flags,
         ],
         env=env,
         launcher=launcher,
