@@ -266,6 +266,12 @@ def local_or_cached_model_path(model_name_or_path: str, cache_root: Path, hf_tok
         log(f"Model already available locally: {resolved}")
         return resolved
 
+    if candidate.is_absolute():
+        raise FileNotFoundError(
+            "Model path does not exist on disk: "
+            f"{candidate}. If this is meant to be a local checkpoint, verify the directory name/path."
+        )
+
     local_dir = ensure_dir(cache_root / sanitize_model_name(model_name_or_path))
     if any(local_dir.iterdir()):
         resolved = str(local_dir.resolve())
@@ -408,6 +414,9 @@ def resolve_tokenizer_source(
     hf_token: Optional[str],
     peft_base_model_override: Optional[str] = None,
 ) -> str:
+    if peft_base_model_override:
+        return peft_base_model_override
+
     model_path = Path(model_name_or_path)
     if not is_peft_adapter_checkpoint(model_path):
         return model_name_or_path
