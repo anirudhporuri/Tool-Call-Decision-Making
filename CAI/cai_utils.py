@@ -205,7 +205,7 @@ def extract_leading_json(text: str) -> Any:
 def _ast_literal(node: ast.AST) -> Any:
     try:
         return ast.literal_eval(node)
-    except (ValueError, SyntaxError):
+    except (ValueError, SyntaxError, TypeError):
         if isinstance(node, ast.Name):
             lowered = node.id.lower()
             if lowered == "true":
@@ -225,7 +225,12 @@ def _ast_literal(node: ast.AST) -> Any:
             return ast.unparse(node)
         if isinstance(node, ast.Subscript):
             return ast.unparse(node)
-        raise
+        # Preserve any remaining expression-shaped argument rather than
+        # crashing the whole CAI stage on a malformed tool-call payload.
+        try:
+            return ast.unparse(node)
+        except Exception:
+            raise
 
 
 def parse_llama_single_toolcall(text: str) -> Optional[Dict[str, Any]]:
