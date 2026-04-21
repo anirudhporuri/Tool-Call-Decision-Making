@@ -28,7 +28,7 @@ echo "Activating virtualenv at ${VENV_DIR}"
 source "${VENV_DIR}/bin/activate"
 
 OUTPUT_DIR="${REPO_ROOT}/Probe Baselines/outputs/llama32_3b_sft_probe"
-EVAL_SAMPLES="${REPO_ROOT}/Prompting Baselines/outputs/llama_32_3b_sft_zeroshot_eval/samples.jsonl"
+EVAL_SAMPLES="${REPO_ROOT}/Prompting Baselines/outputs/llama32_3b_sft_zeroshot_eval/samples.jsonl"
 
 python3 -u "${REPO_ROOT}/Probe Baselines/run_probe.py" \
   "${REPO_ROOT}/Post-Training Baselines/outputs/llama_32_3b_sft" \
