@@ -102,6 +102,11 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--output_dir", required=True)
     parser.add_argument("--eval_samples_jsonl", required=True)
     parser.add_argument(
+        "--peft_base_model_override",
+        default=None,
+        help="Optional base-model path/ID to use when model_name_or_path is a PEFT adapter checkpoint.",
+    )
+    parser.add_argument(
         "--train_source_jsonls",
         nargs="+",
         default=[str(path) for path in DEFAULT_TRAIN_SOURCE_JSONLS],
@@ -373,7 +378,29 @@ def has_local_tokenizer_files(path: str | Path) -> bool:
     return any((candidate / filename).exists() for filename in TOKENIZER_FILE_HINTS)
 
 
-def resolve_tokenizer_source(model_name_or_path: str, hf_token: Optional[str]) -> str:
+def resolve_peft_base_model_source(
+    model_name_or_path: str,
+    hf_token: Optional[str],
+    override: Optional[str] = None,
+) -> str:
+    if override:
+        return override
+
+    model_path = Path(model_name_or_path)
+    if not is_peft_adapter_checkpoint(model_path):
+        return model_name_or_path
+
+    from peft import PeftConfig
+
+    peft_config = PeftConfig.from_pretrained(model_name_or_path, token=hf_token)
+    return peft_config.base_model_name_or_path
+
+
+def resolve_tokenizer_source(
+    model_name_or_path: str,
+    hf_token: Optional[str],
+    peft_base_model_override: Optional[str] = None,
+) -> str:
     model_path = Path(model_name_or_path)
     if not is_peft_adapter_checkpoint(model_path):
         return model_name_or_path
@@ -381,10 +408,11 @@ def resolve_tokenizer_source(model_name_or_path: str, hf_token: Optional[str]) -
     if has_local_tokenizer_files(model_path):
         return model_name_or_path
 
-    from peft import PeftConfig
-
-    peft_config = PeftConfig.from_pretrained(model_name_or_path, token=hf_token)
-    return peft_config.base_model_name_or_path
+    return resolve_peft_base_model_source(
+        model_name_or_path,
+        hf_token,
+        override=peft_base_model_override,
+    )
 
 
 def build_quant_config(dtype_name: str) -> BitsAndBytesConfig:
@@ -398,7 +426,11 @@ def build_quant_config(dtype_name: str) -> BitsAndBytesConfig:
 
 
 def load_tokenizer_and_model(args: argparse.Namespace):
-    tokenizer_source = resolve_tokenizer_source(args.model_name_or_path, args.hf_token)
+    tokenizer_source = resolve_tokenizer_source(
+        args.model_name_or_path,
+        args.hf_token,
+        peft_base_model_override=args.peft_base_model_override,
+    )
     tokenizer = AutoTokenizer.from_pretrained(
         tokenizer_source,
         token=args.hf_token,
@@ -420,11 +452,15 @@ def load_tokenizer_and_model(args: argparse.Namespace):
         model_kwargs["torch_dtype"] = get_dtype(args.dtype)
 
     if is_peft_adapter_checkpoint(args.model_name_or_path):
-        from peft import PeftConfig, PeftModel
+        from peft import PeftModel
 
-        peft_config = PeftConfig.from_pretrained(args.model_name_or_path, token=args.hf_token)
+        peft_base_model_source = resolve_peft_base_model_source(
+            args.model_name_or_path,
+            args.hf_token,
+            override=args.peft_base_model_override,
+        )
         base_model = AutoModelForCausalLM.from_pretrained(
-            peft_config.base_model_name_or_path,
+            peft_base_model_source,
             **model_kwargs,
         )
         model = PeftModel.from_pretrained(
@@ -1083,6 +1119,12 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
                 model_cache_dir,
                 args.hf_token,
             )
+            if args.peft_base_model_override:
+                args.peft_base_model_override = local_or_cached_model_path(
+                    args.peft_base_model_override,
+                    model_cache_dir,
+                    args.hf_token,
+                )
         log("Loading tokenizer and model for hidden-state extraction")
         tokenizer, model = load_tokenizer_and_model(args)
         layer_specs = resolve_layer_specs(model)

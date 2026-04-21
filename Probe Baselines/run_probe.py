@@ -37,6 +37,11 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("model_family", choices=["llama", "gemma"])
     parser.add_argument("output_dir")
     parser.add_argument("eval_samples_jsonl")
+    parser.add_argument(
+        "--peft-base-model-override",
+        default=None,
+        help="Optional base-model path/ID to use when model_name_or_path is a PEFT adapter checkpoint.",
+    )
     parser.add_argument("--train-source-jsonls", nargs="+", default=[str(path) for path in DEFAULT_TRAIN_SOURCE_JSONLS])
     parser.add_argument("--dataset-dir", default=os.getenv("DATASET_DIR", str(DEFAULT_DATASET_DIR)))
     parser.add_argument("--model-cache-dir", default=os.getenv("MODEL_CACHE_DIR", str(REPO_ROOT / "cluster_cache" / "model_cache")))
@@ -125,6 +130,8 @@ def build_probe_argv(args: argparse.Namespace) -> List[str]:
         *[str(value) for value in args.c_values],
     ]
 
+    if args.peft_base_model_override:
+        forwarded.extend(["--peft_base_model_override", args.peft_base_model_override])
     if args.fewshot_json:
         forwarded.extend(["--fewshot_json", args.fewshot_json])
     if args.hf_token:
