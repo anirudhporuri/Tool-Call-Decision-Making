@@ -21,7 +21,7 @@ set -euo pipefail
 source ~/.bashrc
 REPO_ROOT="/fs/classhomes/mukunds/Tool-Call-Decision-Making"
 VENV_DIR="${REPO_ROOT}/.venv"
-GEMMA_SHARED_ROOT="/fs/class-projects/sping2026/cmsc848q/mukunds"
+GEMMA_SHARED_ROOT="/fs/class-projects/spring2026/cmsc848q/mukunds"
 GEMMA_BASE_MODEL_DIR="${GEMMA_SHARED_ROOT}/google__gemma-3-4b-it"
 
 echo "Activating virtualenv at ${VENV_DIR}"
