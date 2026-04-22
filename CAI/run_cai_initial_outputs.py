@@ -177,6 +177,12 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     existing_records: List[Dict[str, Any]] = []
     if output_path.exists():
         existing_records = load_jsonl(output_path, allow_partial_last_line=True)
+        if output_path.stat().st_size > 0 and not existing_records:
+            raise RuntimeError(
+                f"Existing initial outputs file {output_path} is non-empty but no rows could be recovered. "
+                "Refusing to overwrite it automatically."
+            )
+        print(f"Found existing initial outputs file at {output_path} with {len(existing_records)} parsed rows.")
     existing_by_id = index_records_by_example_id(existing_records)
     source_example_ids = {row["example_id"] for row in source_rows}
     extra_ids = sorted(set(existing_by_id) - source_example_ids)
@@ -251,6 +257,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
 
     ordered_records = [existing_by_id[row["example_id"]] for row in source_rows]
     write_jsonl(output_path, ordered_records)
+    print(f"Wrote complete initial outputs to {output_path} ({len(ordered_records)} rows).")
     save_json(
         out_dir / "summary.json",
         {
@@ -267,6 +274,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             "result_summary": summarize_records(ordered_records),
         },
     )
+    print(f"Wrote initial output summary to {out_dir / 'summary.json'}.")
 
 
 if __name__ == "__main__":

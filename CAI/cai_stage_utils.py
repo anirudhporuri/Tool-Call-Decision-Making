@@ -124,6 +124,11 @@ def load_existing_stage_records(
         return [], {}
 
     existing_rows = load_jsonl(output_path, allow_partial_last_line=True)
+    if output_path.stat().st_size > 0 and not existing_rows:
+        raise RuntimeError(
+            f"Existing {stage_name} file {output_path} is non-empty but no rows could be recovered. "
+            "Refusing to overwrite it automatically."
+        )
     indexed = index_stage_rows(existing_rows, stage_name)
     source_example_ids = {row["example_id"] for row in source_rows}
     extras = sorted(set(indexed) - source_example_ids)

@@ -4,6 +4,7 @@ import ast
 import copy
 import gc
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -90,7 +91,13 @@ def ensure_dir(path: str | Path) -> Path:
 
 
 def save_json(path: str | Path, payload: Dict[str, Any]) -> None:
-    Path(path).write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    path_obj = Path(path)
+    temp_path = path_obj.with_name(f"{path_obj.name}.{os.getpid()}.tmp")
+    with temp_path.open("w", encoding="utf-8") as handle:
+        handle.write(json.dumps(payload, indent=2))
+        handle.flush()
+        os.fsync(handle.fileno())
+    temp_path.replace(path_obj)
 
 
 def load_jsonl(path: str | Path, *, allow_partial_last_line: bool = False) -> List[Dict[str, Any]]:
@@ -110,9 +117,14 @@ def load_jsonl(path: str | Path, *, allow_partial_last_line: bool = False) -> Li
 
 
 def write_jsonl(path: str | Path, rows: Iterable[Dict[str, Any]]) -> None:
-    with Path(path).open("w", encoding="utf-8") as handle:
+    path_obj = Path(path)
+    temp_path = path_obj.with_name(f"{path_obj.name}.{os.getpid()}.tmp")
+    with temp_path.open("w", encoding="utf-8") as handle:
         for row in rows:
             handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+    temp_path.replace(path_obj)
 
 
 def append_jsonl(path: str | Path, rows: Iterable[Dict[str, Any]]) -> None:
@@ -123,6 +135,7 @@ def append_jsonl(path: str | Path, rows: Iterable[Dict[str, Any]]) -> None:
         for row in rows_list:
             handle.write(json.dumps(row, ensure_ascii=False) + "\n")
         handle.flush()
+        os.fsync(handle.fileno())
 
 
 def progress(iterable: Iterable[Any], **kwargs: Any) -> Iterable[Any]:
