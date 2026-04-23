@@ -454,6 +454,9 @@ def load_tokenizer_and_model(args: argparse.Namespace):
     )
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
+    # Probe extraction uses the final prompt token as the representation target, so
+    # if we must truncate, preserve the end of the prompt (current question + answer slot).
+    tokenizer.truncation_side = "left"
 
     model_kwargs: Dict[str, Any] = {
         "token": args.hf_token,
@@ -701,6 +704,7 @@ def extract_features(
     feature_batches: List[np.ndarray] = []
     label_batches: List[np.ndarray] = []
     metadata_rows: List[Dict[str, Any]] = []
+    num_truncated_prompts = 0
 
     for start in tqdm(range(0, len(examples), args.batch_size), desc=f"Extracting {split_name} features"):
         batch_examples = list(examples[start : start + args.batch_size])
@@ -713,6 +717,13 @@ def extract_features(
             )
             for example in batch_examples
         ]
+        untruncated_lengths = tokenizer(
+            prompts,
+            add_special_tokens=False,
+            padding=False,
+            truncation=False,
+            return_length=True,
+        )["length"]
         encoded = tokenizer(
             prompts,
             add_special_tokens=False,
@@ -747,9 +758,19 @@ def extract_features(
         label_batches.append(batch_labels)
 
         prompt_lengths = attention_mask.sum(dim=1).detach().cpu().tolist()
-        for example, prompt, prompt_length in zip(batch_examples, prompts, prompt_lengths):
+        for example, prompt, prompt_length, original_length in zip(
+            batch_examples,
+            prompts,
+            prompt_lengths,
+            untruncated_lengths,
+        ):
+            was_truncated = int(original_length) > args.max_length
+            if was_truncated:
+                num_truncated_prompts += 1
             row_metadata = dict(example.metadata)
             row_metadata["prompt_length_tokens"] = int(prompt_length)
+            row_metadata["prompt_original_length_tokens"] = int(original_length)
+            row_metadata["prompt_was_truncated"] = bool(was_truncated)
             row_metadata["extracted_token_index"] = int(prompt_length) - 1
             row_metadata["extracted_token_kind"] = "last_non_padding_token_of_prompt_only_input"
             row_metadata["prompt_includes_target_or_mcq_answers"] = False
@@ -760,6 +781,11 @@ def extract_features(
 
     features = np.concatenate(feature_batches, axis=0)
     labels = np.concatenate(label_batches, axis=0)
+    if num_truncated_prompts:
+        log(
+            f"{split_name}: {num_truncated_prompts}/{len(examples)} prompts exceeded max_length={args.max_length} "
+            "and were left-truncated to preserve the current question."
+        )
     return features, labels, metadata_rows
 
 
