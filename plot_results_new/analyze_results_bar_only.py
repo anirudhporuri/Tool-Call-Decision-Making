@@ -904,8 +904,8 @@ def make_bar_plots(
 ) -> None:
     run_order = runs_df["run_display"].tolist()
     runs_plot = apply_run_order(runs_df, run_order)
-    full_scope = "When2Call (hmm): Prompting + Post-Training + CAI + Probe"
-    no_probe_scope = "When2Call (hmm): Prompting + Post-Training + CAI"
+    all_runs_suffix = "(All Runs)"
+    no_probe_suffix = "(No Probe)"
 
     runs_plot["fill_group"] = runs_plot.apply(
         lambda row: "pending" if bool(row["is_placeholder"]) else str(row["model_family"]),
@@ -932,7 +932,7 @@ def make_bar_plots(
         + coord_flip()
         + scale_fill_manual(values=FAMILY_COLORS)
         + scale_y_continuous(labels=percent_format(), limits=(0.0, 1.08), breaks=[0.0, 0.2, 0.4, 0.6, 0.8, 1.0])
-        + labs(title=f"{full_scope} - Normalized Accuracy by Run", x="", y="Accuracy", fill="Model Family")
+        + labs(title=f"Normalized Accuracy on When2Call {all_runs_suffix}", x="", y="Accuracy", fill="Model Family")
         + theme_bw()
         + theme(figure_size=(11, 6), axis_text_y=element_text(size=9))
     )
@@ -945,7 +945,7 @@ def make_bar_plots(
         + coord_flip()
         + scale_fill_manual(values=FAMILY_COLORS)
         + scale_y_continuous(labels=percent_format(), limits=(0.0, 1.08), breaks=[0.0, 0.2, 0.4, 0.6, 0.8, 1.0])
-        + labs(title=f"{full_scope} - Normalized Macro-F1 by Run", x="", y="Macro-F1", fill="Model Family")
+        + labs(title=f"Normalized Macro-F1 on When2Call {all_runs_suffix}", x="", y="Macro-F1", fill="Model Family")
         + theme_bw()
         + theme(figure_size=(11, 6), axis_text_y=element_text(size=9))
     )
@@ -963,7 +963,7 @@ def make_bar_plots(
             + scale_fill_manual(values=FAMILY_COLORS)
             + scale_y_continuous(labels=percent_format(), limits=(0.0, 1.08), breaks=[0.0, 0.2, 0.4, 0.6, 0.8, 1.0])
             + labs(
-                title=f"{no_probe_scope} - Normalized Accuracy by Run (Without Probe)",
+                title=f"Normalized Accuracy on When2Call {no_probe_suffix}",
                 x="",
                 y="Accuracy",
                 fill="Model Family",
@@ -987,7 +987,7 @@ def make_bar_plots(
             + scale_fill_manual(values=FAMILY_COLORS)
             + scale_y_continuous(labels=percent_format(), limits=(0.0, 1.08), breaks=[0.0, 0.2, 0.4, 0.6, 0.8, 1.0])
             + labs(
-                title=f"{no_probe_scope} - Normalized Macro-F1 by Run (Without Probe)",
+                title=f"Normalized Macro-F1 on When2Call {no_probe_suffix}",
                 x="",
                 y="Macro-F1",
                 fill="Model Family",
@@ -1011,10 +1011,10 @@ def make_bar_plots(
         class_plot_df["behavior_class_display"] = class_plot_df["behavior_class"].map(CLASS_DISPLAY)
         class_pending = pending_annotation_df(runs_plot, run_order, y_value=0.03)
         per_class_metrics = [
-            ("accuracy", "Accuracy (One-vs-Rest)", "per_class_accuracy_bar_by_run", "Per-Class Accuracy by Run (Normalized)"),
-            ("precision", "Precision", "per_class_precision_bar_by_run", "Per-Class Precision by Run (Normalized)"),
-            ("recall", "Recall", "per_class_recall_bar_by_run", "Per-Class Recall by Run (Normalized)"),
-            ("f1", "F1", "per_class_f1_bar_by_run", "Per-Class F1 by Run (Normalized)"),
+            ("accuracy", "Accuracy (One-vs-Rest)", "per_class_accuracy_bar_by_run", "Per-Class Accuracy (Normalized)"),
+            ("precision", "Precision", "per_class_precision_bar_by_run", "Per-Class Precision (Normalized)"),
+            ("recall", "Recall", "per_class_recall_bar_by_run", "Per-Class Recall (Normalized)"),
+            ("f1", "F1", "per_class_f1_bar_by_run", "Per-Class F1 (Normalized)"),
         ]
 
         for metric_col, y_label, base_name, title_suffix in per_class_metrics:
@@ -1024,7 +1024,7 @@ def make_bar_plots(
                 + coord_flip()
                 + scale_fill_manual(values=PREDICTION_COLORS)
                 + scale_y_continuous(labels=percent_format(), limits=(0.0, 1.0), breaks=[0.0, 0.2, 0.4, 0.6, 0.8, 1.0])
-                + labs(title=f"{full_scope} - {title_suffix}", x="", y=y_label, fill="Class")
+                + labs(title=f"{title_suffix} on When2Call {all_runs_suffix}", x="", y=y_label, fill="Class")
                 + theme_bw()
                 + theme(figure_size=(12, 7), axis_text_y=element_text(size=9))
             )
@@ -1056,7 +1056,7 @@ def make_bar_plots(
                     + scale_fill_manual(values=PREDICTION_COLORS)
                     + scale_y_continuous(labels=percent_format(), limits=(0.0, 1.0), breaks=[0.0, 0.2, 0.4, 0.6, 0.8, 1.0])
                     + labs(
-                        title=f"{no_probe_scope} - {title_suffix} (Without Probe)",
+                        title=f"{title_suffix} on When2Call {no_probe_suffix}",
                         x="",
                         y=y_label,
                         fill="Class",
@@ -1091,7 +1091,7 @@ def make_bar_plots(
             + scale_fill_manual(values=SCORING_COLORS)
             + scale_y_continuous(labels=percent_format(), limits=(0.0, 1.0), breaks=[0.0, 0.2, 0.4, 0.6, 0.8, 1.0])
             + labs(
-                title=f"{full_scope} - Unsupported 'direct' Prediction Rate",
+                title=f"Unsupported 'direct' Prediction Rate on When2Call {all_runs_suffix}",
                 x="",
                 y="Rate",
                 fill="Scoring",
@@ -1127,7 +1127,7 @@ def make_bar_plots(
                 + scale_fill_manual(values=SCORING_COLORS)
                 + scale_y_continuous(labels=percent_format(), limits=(0.0, 1.0), breaks=[0.0, 0.2, 0.4, 0.6, 0.8, 1.0])
                 + labs(
-                    title=f"{no_probe_scope} - Unsupported 'direct' Prediction Rate (Without Probe)",
+                    title=f"Unsupported 'direct' Prediction Rate on When2Call {no_probe_suffix}",
                     x="",
                     y="Rate",
                     fill="Scoring",
@@ -1162,7 +1162,7 @@ def make_bar_plots(
             + scale_fill_manual(values=OUTCOME_COLORS)
             + scale_y_continuous(labels=percent_format(), limits=(0.0, 1.0), breaks=[0.0, 0.2, 0.4, 0.6, 0.8, 1.0])
             + labs(
-                title=f"{full_scope} - Normalization Outcome Breakdown",
+                title=f"Normalization Outcome Breakdown on When2Call {all_runs_suffix}",
                 x="",
                 y="Fraction of Examples",
                 fill="Outcome",
@@ -1198,7 +1198,7 @@ def make_bar_plots(
                 + scale_fill_manual(values=OUTCOME_COLORS)
                 + scale_y_continuous(labels=percent_format(), limits=(0.0, 1.0), breaks=[0.0, 0.2, 0.4, 0.6, 0.8, 1.0])
                 + labs(
-                    title=f"{no_probe_scope} - Normalization Outcome Breakdown (Without Probe)",
+                    title=f"Normalization Outcome Breakdown on When2Call {no_probe_suffix}",
                     x="",
                     y="Fraction of Examples",
                     fill="Outcome",
@@ -1236,7 +1236,7 @@ def make_bar_plots(
                 + scale_fill_manual(values=PREDICTION_COLORS)
                 + scale_y_continuous(labels=percent_format(), limits=(0.0, 1.0), breaks=[0.0, 0.2, 0.4, 0.6, 0.8, 1.0])
                 + labs(
-                    title=f"{full_scope} - Normalized Prediction Mix by Run",
+                    title=f"Normalized Prediction Mix on When2Call {all_runs_suffix}",
                     x="",
                     y="Fraction of Predictions",
                     fill="Predicted Label",
@@ -1281,7 +1281,7 @@ def make_bar_plots(
                         breaks=[0.0, 0.2, 0.4, 0.6, 0.8, 1.0],
                     )
                     + labs(
-                        title=f"{no_probe_scope} - Normalized Prediction Mix by Run (Without Probe)",
+                        title=f"Normalized Prediction Mix on When2Call {no_probe_suffix}",
                         x="",
                         y="Fraction of Predictions",
                         fill="Predicted Label",
