@@ -8,7 +8,7 @@
     \midrule
     Llama Prompting Zero-shot & 0.023 & 0.122 & +0.099 \\
     Llama Prompting 4-shot & 0.023 & 0.077 & +0.054 \\
-    Llama Post-Training SFT & 0.004 & 0.005 & +0.001 \\
+    Llama Post-Training SFT & \textbf{0.004} & \textbf{0.005} & \textbf{+0.001} \\
     Llama Post-Training DPO & 0.019 & 0.077 & +0.059 \\
     Llama CAI SFT & 0.020 & 0.079 & +0.059 \\
     Llama CAI DPO (Base) & 0.024 & 0.119 & +0.095 \\
@@ -18,8 +18,8 @@
     Gemma Post-Training SFT & 0.183 & 0.293 & +0.110 \\
     Gemma Post-Training DPO & 0.188 & 0.256 & +0.068 \\
     Gemma CAI SFT & 0.021 & 0.042 & +0.021 \\
-    Gemma CAI DPO (Base) & \textbf{0.000} & \textbf{0.000} & \textbf{+0.000} \\
-    Gemma CAI DPO (From SFT) & \textbf{0.000} & \textbf{0.000} & \textbf{+0.000} \\
+    Gemma CAI DPO (Base) & 0.000 & 0.000 & +0.000 \\
+    Gemma CAI DPO (From SFT) & 0.000 & 0.000 & +0.000 \\
     \bottomrule
   \end{tabular}
   \caption{Unsupported direct prediction rate by run (no probe).}

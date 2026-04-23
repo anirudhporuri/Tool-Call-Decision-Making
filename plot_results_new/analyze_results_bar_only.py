@@ -94,6 +94,8 @@ PREDICTION_COLORS = {
     "Cannot answer": "#d62728",
     "Direct": "#9467bd",
 }
+CORRUPTED_PROBE_SOURCE_VARIANTS = {"Prompting 4-shot"}
+PROBE_PENDING_REASON = "Pending (corrupted 4-shot probe)"
 PROBE_LAYER_COLORS = {
     "Middle layer": "#1f78b4",
     "75% depth layer": "#2ca02c",
@@ -189,6 +191,10 @@ PROBE_LAYER_COLUMNS = [
     "norm_accuracy",
     "raw_macro_f1",
     "norm_macro_f1",
+    "raw_macro_precision",
+    "norm_macro_precision",
+    "raw_macro_recall",
+    "norm_macro_recall",
     "n_examples",
     "used_in_main_plots",
     "accuracy_rank_within_probe",
@@ -731,6 +737,12 @@ def enrich_probe_layer_selection(probe_layers_df: pd.DataFrame) -> pd.DataFrame:
 
     eps = 1e-12
     for parent_key, group in frame.groupby("probe_parent_key", sort=False):
+        if bool(group["is_placeholder"].all()):
+            chosen_rows = frame[(frame["probe_parent_key"] == parent_key) & (frame["used_in_main_plots"])]
+            if not chosen_rows.empty:
+                frame.loc[chosen_rows.index, "selection_reason"] = PROBE_PENDING_REASON
+            continue
+
         ranked = group.sort_values(["norm_accuracy", "norm_macro_f1"], ascending=False).reset_index(drop=True)
         if ranked.empty:
             continue
@@ -753,6 +765,94 @@ def enrich_probe_layer_selection(probe_layers_df: pd.DataFrame) -> pd.DataFrame:
             frame.loc[chosen_rows.index, "selection_reason"] = reason
 
     return frame
+
+
+def build_probe_pending_rows(
+    *,
+    run_key: str,
+    run_display: str,
+    model_family: str,
+    run_group: str,
+    variant_label: str,
+    probe_source_variant: str,
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
+    class_rows: List[Dict[str, Any]] = []
+    direct_rows: List[Dict[str, Any]] = []
+    outcome_rows: List[Dict[str, Any]] = []
+    pred_mix_rows: List[Dict[str, Any]] = []
+
+    for scoring in ("raw", "normalized"):
+        direct_rows.append(
+            {
+                "run_key": run_key,
+                "run_display": run_display,
+                "model_family": model_family,
+                "run_group": run_group,
+                "variant_label": variant_label,
+                "probe_source_variant": probe_source_variant,
+                "is_probe": True,
+                "is_placeholder": True,
+                "scoring": scoring,
+                "n_examples": 0,
+                "direct_predictions": 0,
+                "direct_prediction_rate": 0.0,
+            }
+        )
+        for label in DEFAULT_LABEL_ORDER:
+            pred_mix_rows.append(
+                {
+                    "run_key": run_key,
+                    "run_display": run_display,
+                    "model_family": model_family,
+                    "run_group": run_group,
+                    "variant_label": variant_label,
+                    "probe_source_variant": probe_source_variant,
+                    "is_probe": True,
+                    "is_placeholder": True,
+                    "scoring": scoring,
+                    "label": label,
+                    "fraction": 0.0,
+                }
+            )
+        for behavior_class in PRIMARY_BEHAVIOR_CLASSES:
+            class_rows.append(
+                {
+                    "run_key": run_key,
+                    "run_display": run_display,
+                    "model_family": model_family,
+                    "run_group": run_group,
+                    "variant_label": variant_label,
+                    "probe_source_variant": probe_source_variant,
+                    "is_probe": True,
+                    "is_placeholder": True,
+                    "scoring": scoring,
+                    "behavior_class": behavior_class,
+                    "accuracy": 0.0,
+                    "precision": 0.0,
+                    "recall": 0.0,
+                    "f1": 0.0,
+                    "support": 0.0,
+                }
+            )
+
+    for outcome in OUTCOME_ORDER:
+        outcome_rows.append(
+            {
+                "run_key": run_key,
+                "run_display": run_display,
+                "model_family": model_family,
+                "run_group": run_group,
+                "variant_label": variant_label,
+                "probe_source_variant": probe_source_variant,
+                "is_probe": True,
+                "is_placeholder": True,
+                "outcome": outcome,
+                "count": 0,
+                "fraction": 0.0,
+            }
+        )
+
+    return class_rows, direct_rows, outcome_rows, pred_mix_rows
 
 
 def enforce_unique_run_displays(
@@ -998,19 +1098,26 @@ def column_extrema_mask(
     numeric_rows: Sequence[Sequence[float]],
     *,
     preferences: Sequence[str],
+    eligible_rows: Sequence[bool] | None = None,
     eps: float = 1e-12,
 ) -> List[List[bool]]:
     if not numeric_rows:
         return []
     n_cols = len(numeric_rows[0])
     mask = [[False for _ in range(n_cols)] for _ in range(len(numeric_rows))]
+    if eligible_rows is None:
+        eligible_rows = [True] * len(numeric_rows)
     for col_idx in range(n_cols):
         pref = preferences[col_idx] if col_idx < len(preferences) else "none"
         if pref not in {"max", "min"}:
             continue
-        values = [float(row[col_idx]) for row in numeric_rows]
+        eligible_indices = [i for i, ok in enumerate(eligible_rows) if bool(ok)]
+        if not eligible_indices:
+            continue
+        values = [float(numeric_rows[i][col_idx]) for i in eligible_indices]
         target = max(values) if pref == "max" else min(values)
-        for row_idx, v in enumerate(values):
+        for row_idx in eligible_indices:
+            v = float(numeric_rows[row_idx][col_idx])
             if abs(v - target) <= eps:
                 mask[row_idx][col_idx] = True
     return mask
@@ -1021,10 +1128,15 @@ def build_latex_rows_with_bold(
     labels: Sequence[str],
     numeric_rows: Sequence[Sequence[float]],
     preferences: Sequence[str],
+    eligible_rows: Sequence[bool] | None = None,
     signed_cols: Sequence[int] = (),
     digits: int = 3,
 ) -> List[List[str]]:
-    extrema = column_extrema_mask(numeric_rows, preferences=preferences)
+    extrema = column_extrema_mask(
+        numeric_rows,
+        preferences=preferences,
+        eligible_rows=eligible_rows,
+    )
     signed_col_set = set(signed_cols)
     out: List[List[str]] = []
     for row_idx, label in enumerate(labels):
@@ -1097,6 +1209,14 @@ def write_chart_tables(
     run_order = runs_df["run_display"].tolist()
     no_probe_runs = runs_df[~runs_df["is_probe"].fillna(False)].copy()
     no_probe_order = no_probe_runs["run_display"].tolist()
+    run_is_eligible_all = {
+        str(row["run_display"]): (not bool(row["is_placeholder"]))
+        for _, row in runs_df[["run_display", "is_placeholder"]].drop_duplicates().iterrows()
+    }
+    run_is_eligible_no_probe = {
+        str(row["run_display"]): (not bool(row["is_placeholder"]))
+        for _, row in no_probe_runs[["run_display", "is_placeholder"]].drop_duplicates().iterrows()
+    }
 
     def _write_run_metric_table(
         *,
@@ -1110,10 +1230,12 @@ def write_chart_tables(
         ordered = run_ordered_subset(run_subset, run_subset["run_display"].tolist())
         labels = [str(r["run_display"]) for _, r in ordered.iterrows()]
         numeric_rows = [[float(r[metric_col])] for _, r in ordered.iterrows()]
+        eligible_rows = [not bool(r.get("is_placeholder", False)) for _, r in ordered.iterrows()]
         rows = build_latex_rows_with_bold(
             labels=labels,
             numeric_rows=numeric_rows,
             preferences=["max"],
+            eligible_rows=eligible_rows,
         )
         write_latex_table_text(
             output_path=tables_dir / f"{base_name}_table_latex.txt",
@@ -1189,6 +1311,7 @@ def write_chart_tables(
             labels=labels,
             numeric_rows=numeric_rows,
             preferences=["max", "max", "max"],
+            eligible_rows=[run_is_eligible_all.get(label, True) for label in labels],
         )
         write_latex_table_text(
             output_path=tables_dir / f"{base_name}_table_latex.txt",
@@ -1219,6 +1342,7 @@ def write_chart_tables(
             labels=labels_no_probe,
             numeric_rows=numeric_rows_no_probe,
             preferences=["max", "max", "max"],
+            eligible_rows=[run_is_eligible_no_probe.get(label, True) for label in labels_no_probe],
         )
         write_latex_table_text(
             output_path=tables_dir / f"{base_name}_without_probe_table_latex.txt",
@@ -1246,6 +1370,7 @@ def write_chart_tables(
             labels=labels,
             numeric_rows=numeric_rows,
             preferences=["min", "min", "min"],
+            eligible_rows=[run_is_eligible_all.get(label, True) for label in labels],
             signed_cols=[2],
         )
         write_latex_table_text(
@@ -1295,6 +1420,7 @@ def write_chart_tables(
             labels=labels,
             numeric_rows=numeric_rows,
             preferences=["max", "max", "min", "min"],
+            eligible_rows=[run_is_eligible_all.get(label, True) for label in labels],
         )
         write_latex_table_text(
             output_path=tables_dir / f"{base_name}_table_latex.txt",
@@ -1344,6 +1470,7 @@ def write_chart_tables(
             labels=labels,
             numeric_rows=numeric_rows,
             preferences=["min", "max", "max", "max"],
+            eligible_rows=[run_is_eligible_all.get(label, True) for label in labels],
         )
         write_latex_table_text(
             output_path=tables_dir / f"{base_name}_table_latex.txt",
@@ -1373,8 +1500,11 @@ def write_chart_tables(
     if not probe_layers_df.empty:
         ordered_probe_layers = sort_runs(probe_layers_df)
         layer_order = ["Middle layer", "75% depth layer", "Last layer"]
+        parent_pending_map = (
+            ordered_probe_layers.groupby("probe_parent_display", observed=False)["is_placeholder"].all().to_dict()
+        )
 
-        def _write_probe_layer_table(base_name: str, metric_col: str, metric_header: str, caption: str, label: str) -> None:
+        def _write_probe_layer_table(base_name: str, metric_col: str, caption: str, label: str) -> None:
             pivot = (
                 ordered_probe_layers.pivot_table(
                     index="probe_parent_display",
@@ -1398,20 +1528,33 @@ def write_chart_tables(
                     float(row.get("75% depth layer", 0.0)),
                     float(row.get("Last layer", 0.0)),
                 ]
-                row_best = max(layer_values)
-                layer_cells = [
-                    fmt_latex_number(layer_values[0], bold=abs(layer_values[0] - row_best) <= 1e-12),
-                    fmt_latex_number(layer_values[1], bold=abs(layer_values[1] - row_best) <= 1e-12),
-                    fmt_latex_number(layer_values[2], bold=abs(layer_values[2] - row_best) <= 1e-12),
-                ]
+                parent_display = str(row["probe_parent_display"])
+                is_pending_parent = bool(parent_pending_map.get(parent_display, False))
+                if is_pending_parent:
+                    layer_cells = [
+                        fmt_latex_number(layer_values[0], bold=False),
+                        fmt_latex_number(layer_values[1], bold=False),
+                        fmt_latex_number(layer_values[2], bold=False),
+                    ]
+                    chosen_layer = "PENDING"
+                    selection_reason = PROBE_PENDING_REASON
+                else:
+                    row_best = max(layer_values)
+                    layer_cells = [
+                        fmt_latex_number(layer_values[0], bold=abs(layer_values[0] - row_best) <= 1e-12),
+                        fmt_latex_number(layer_values[1], bold=abs(layer_values[1] - row_best) <= 1e-12),
+                        fmt_latex_number(layer_values[2], bold=abs(layer_values[2] - row_best) <= 1e-12),
+                    ]
+                    chosen_layer = str(row.get("variant_label", ""))
+                    selection_reason = str(row.get("selection_reason", ""))
                 rows.append(
                     [
-                        latex_escape(str(row["probe_parent_display"])),
+                        latex_escape(parent_display),
                         layer_cells[0],
                         layer_cells[1],
                         layer_cells[2],
-                        latex_escape(str(row.get("variant_label", ""))),
-                        latex_escape(str(row.get("selection_reason", ""))),
+                        latex_escape(chosen_layer),
+                        latex_escape(selection_reason),
                     ]
                 )
             write_latex_table_text(
@@ -1426,16 +1569,26 @@ def write_chart_tables(
         _write_probe_layer_table(
             base_name="probe_layer_accuracy_comparison",
             metric_col="norm_accuracy",
-            metric_header="Accuracy",
             caption="Probe-layer accuracy comparison for each probe setup.",
             label="tab:probe-layer-accuracy-comparison",
         )
         _write_probe_layer_table(
             base_name="probe_layer_macro_f1_comparison",
             metric_col="norm_macro_f1",
-            metric_header="Macro-F1",
             caption="Probe-layer macro-F1 comparison for each probe setup.",
             label="tab:probe-layer-macrof1-comparison",
+        )
+        _write_probe_layer_table(
+            base_name="probe_layer_macro_precision_comparison",
+            metric_col="norm_macro_precision",
+            caption="Probe-layer macro precision comparison for each probe setup.",
+            label="tab:probe-layer-macroprecision-comparison",
+        )
+        _write_probe_layer_table(
+            base_name="probe_layer_macro_recall_comparison",
+            metric_col="norm_macro_recall",
+            caption="Probe-layer macro recall comparison for each probe setup.",
+            label="tab:probe-layer-macrorecall-comparison",
         )
 
     non_probe_runs = runs_df[~runs_df["is_probe"].fillna(False)].copy()
@@ -1476,6 +1629,7 @@ def write_chart_tables(
         labels=norm_labels,
         numeric_rows=norm_numeric_rows,
         preferences=["max", "max", "max", "max", "max", "max", "min", "min", "min"],
+        eligible_rows=[not bool(row.get("is_placeholder", False)) for _, row in norm_delta.iterrows()],
         signed_cols=[2, 5, 8],
     )
     write_latex_table_text(
@@ -1947,65 +2101,66 @@ def make_probe_only_plots(*, probe_layers_df: pd.DataFrame, figures_dir: Path) -
         categories=["Middle layer", "75% depth layer", "Last layer"],
         ordered=True,
     )
-
-    best_only = probe_plot[probe_plot["used_in_main_plots"].fillna(False)].copy()
-    if not best_only.empty:
-        best_only["best_accuracy_y"] = (best_only["norm_accuracy"] + 0.08).clip(upper=1.10)
-        best_only["best_f1_y"] = (best_only["norm_macro_f1"] + 0.08).clip(upper=1.10)
-        best_only["best_label"] = "BEST"
-
-    probe_accuracy_plot = (
-        ggplot(probe_plot, aes(x="probe_parent_display", y="norm_accuracy", fill="layer_display"))
-        + geom_col(position=position_dodge(width=0.78), width=0.7)
-        + coord_flip()
-        + scale_fill_manual(values=PROBE_LAYER_COLORS)
-        + scale_y_continuous(labels=percent_format(), limits=(0.0, 1.12), breaks=[0.0, 0.2, 0.4, 0.6, 0.8, 1.0])
-        + labs(title="Probe Layer Accuracy on When2Call", x="", y="Accuracy", fill="Layer")
-        + theme_bw()
-        + theme(figure_size=(12, 7), axis_text_y=element_text(size=9))
+    pending_parent = (
+        probe_plot.groupby("probe_parent_display", observed=False)["is_placeholder"]
+        .all()
+        .reset_index()
     )
-    if not best_only.empty:
-        probe_accuracy_plot = probe_accuracy_plot + geom_text(
-            data=best_only,
-            mapping=aes(x="probe_parent_display", y="best_accuracy_y", label="best_label", group="layer_display"),
-            inherit_aes=False,
-            position=position_dodge(width=0.78),
-            color="#495057",
-            size=8,
+    pending_parent = pending_parent[pending_parent["is_placeholder"]].copy()
+    if not pending_parent.empty:
+        pending_parent["y"] = 0.04
+        pending_parent["label"] = "PENDING"
+
+    def _plot_probe_metric(metric_col: str, y_label: str, title: str, base_name: str) -> None:
+        metric_plot = (
+            ggplot(probe_plot, aes(x="probe_parent_display", y=metric_col, fill="layer_display"))
+            + geom_col(position=position_dodge(width=0.78), width=0.7)
+            + coord_flip()
+            + scale_fill_manual(values=PROBE_LAYER_COLORS)
+            + scale_y_continuous(labels=percent_format(), limits=(0.0, 1.12), breaks=[0.0, 0.2, 0.4, 0.6, 0.8, 1.0])
+            + labs(title=title, x="", y=y_label, fill="Layer")
+            + theme_bw()
+            + theme(figure_size=(12, 7), axis_text_y=element_text(size=9))
         )
-    save_plot_multi(
-        probe_accuracy_plot,
-        figures_dir=figures_dir,
+        if not pending_parent.empty:
+            metric_plot = metric_plot + geom_text(
+                data=pending_parent,
+                mapping=aes(x="probe_parent_display", y="y", label="label"),
+                inherit_aes=False,
+                color="#6c757d",
+                size=8,
+            )
+        save_plot_multi(
+            metric_plot,
+            figures_dir=figures_dir,
+            base_name=base_name,
+            width=12,
+            height=7,
+        )
+
+    _plot_probe_metric(
+        metric_col="norm_accuracy",
+        y_label="Accuracy",
+        title="Probe Layer Accuracy on When2Call",
         base_name="probe_layer_accuracy_comparison",
-        width=12,
-        height=7,
     )
-
-    probe_f1_plot = (
-        ggplot(probe_plot, aes(x="probe_parent_display", y="norm_macro_f1", fill="layer_display"))
-        + geom_col(position=position_dodge(width=0.78), width=0.7)
-        + coord_flip()
-        + scale_fill_manual(values=PROBE_LAYER_COLORS)
-        + scale_y_continuous(labels=percent_format(), limits=(0.0, 1.12), breaks=[0.0, 0.2, 0.4, 0.6, 0.8, 1.0])
-        + labs(title="Probe Layer Macro-F1 on When2Call", x="", y="Macro-F1", fill="Layer")
-        + theme_bw()
-        + theme(figure_size=(12, 7), axis_text_y=element_text(size=9))
-    )
-    if not best_only.empty:
-        probe_f1_plot = probe_f1_plot + geom_text(
-            data=best_only,
-            mapping=aes(x="probe_parent_display", y="best_f1_y", label="best_label", group="layer_display"),
-            inherit_aes=False,
-            position=position_dodge(width=0.78),
-            color="#495057",
-            size=8,
-        )
-    save_plot_multi(
-        probe_f1_plot,
-        figures_dir=figures_dir,
+    _plot_probe_metric(
+        metric_col="norm_macro_f1",
+        y_label="Macro-F1",
+        title="Probe Layer Macro-F1 on When2Call",
         base_name="probe_layer_macro_f1_comparison",
-        width=12,
-        height=7,
+    )
+    _plot_probe_metric(
+        metric_col="norm_macro_precision",
+        y_label="Macro Precision",
+        title="Probe Layer Macro Precision on When2Call",
+        base_name="probe_layer_macro_precision_comparison",
+    )
+    _plot_probe_metric(
+        metric_col="norm_macro_recall",
+        y_label="Macro Recall",
+        title="Probe Layer Macro Recall on When2Call",
+        base_name="probe_layer_macro_recall_comparison",
     )
 
 
@@ -2121,20 +2276,30 @@ def main() -> None:
         probe_samples_path = probe_dir / "probe_comparison_samples.jsonl"
         probe_samples = read_jsonl(probe_samples_path) if probe_samples_path.exists() else []
 
-        best_layer_tag = select_best_probe_layer(layers, layer_order)
-        if best_layer_tag is None:
-            continue
-
         candidate_layer_tags = [tag for tag in layer_order if tag in layers]
         if not candidate_layer_tags:
             candidate_layer_tags = sorted(layers.keys())
+        if not candidate_layer_tags:
+            continue
+
+        probe_is_pending = probe_source_variant in CORRUPTED_PROBE_SOURCE_VARIANTS
+        if probe_is_pending:
+            middle_tag = next(
+                (tag for tag in candidate_layer_tags if infer_probe_variant_label(tag) == "Middle layer"),
+                candidate_layer_tags[0],
+            )
+            best_layer_tag = middle_tag
+        else:
+            best_layer_tag = select_best_probe_layer(layers, candidate_layer_tags)
+            if best_layer_tag is None:
+                continue
 
         n_examples = int(probe_eval.get("num_joined_examples", 0) or 0)
 
         for layer_tag in candidate_layer_tags:
             layer_payload = layers.get(layer_tag) or {}
             probe_vs_gold = layer_payload.get("probe_vs_gold") or {}
-            if not probe_vs_gold:
+            if not probe_vs_gold and not probe_is_pending:
                 continue
             layer_variant = infer_probe_variant_label(layer_tag)
             layer_run_key = f"{probe_dir.name}:{layer_tag}"
@@ -2144,7 +2309,21 @@ def main() -> None:
                 layer_variant,
                 probe_source_variant=probe_source_variant,
             )
-            layer_accuracy, layer_macro_f1 = probe_layer_score(layer_payload)
+            if probe_is_pending:
+                layer_accuracy = 0.0
+                layer_macro_f1 = 0.0
+                layer_macro_precision = 0.0
+                layer_macro_recall = 0.0
+            else:
+                layer_accuracy, layer_macro_f1 = probe_layer_score(layer_payload)
+                class_report = probe_vs_gold.get("classification_report", {}) or {}
+                macro_avg = class_report.get("macro avg", {}) or {}
+                layer_macro_precision = float(
+                    probe_vs_gold.get("macro_precision", macro_avg.get("precision", 0.0)) or 0.0
+                )
+                layer_macro_recall = float(
+                    probe_vs_gold.get("macro_recall", macro_avg.get("recall", 0.0)) or 0.0
+                )
             probe_layer_records.append(
                 {
                     "run_key": layer_run_key,
@@ -2156,12 +2335,16 @@ def main() -> None:
                     "variant_label": layer_variant,
                     "probe_source_variant": probe_source_variant,
                     "is_probe": True,
-                    "is_placeholder": False,
+                    "is_placeholder": probe_is_pending,
                     "probe_eval_setting": probe_eval_setting,
                     "raw_accuracy": layer_accuracy,
                     "norm_accuracy": layer_accuracy,
                     "raw_macro_f1": layer_macro_f1,
                     "norm_macro_f1": layer_macro_f1,
+                    "raw_macro_precision": layer_macro_precision,
+                    "norm_macro_precision": layer_macro_precision,
+                    "raw_macro_recall": layer_macro_recall,
+                    "norm_macro_recall": layer_macro_recall,
                     "n_examples": n_examples,
                     "used_in_main_plots": bool(layer_tag == best_layer_tag),
                     "accuracy_rank_within_probe": 0,
@@ -2172,7 +2355,7 @@ def main() -> None:
 
         layer_payload = layers.get(best_layer_tag) or {}
         probe_vs_gold = layer_payload.get("probe_vs_gold") or {}
-        if not probe_vs_gold:
+        if not probe_vs_gold and not probe_is_pending:
             continue
 
         variant_label = infer_probe_variant_label(best_layer_tag)
@@ -2183,7 +2366,11 @@ def main() -> None:
             variant_label,
             probe_source_variant=probe_source_variant,
         )
-        probe_accuracy, probe_macro_f1 = probe_layer_score(layer_payload)
+        if probe_is_pending:
+            probe_accuracy = 0.0
+            probe_macro_f1 = 0.0
+        else:
+            probe_accuracy, probe_macro_f1 = probe_layer_score(layer_payload)
 
         run_records.append(
             {
@@ -2194,7 +2381,7 @@ def main() -> None:
                 "variant_label": variant_label,
                 "probe_source_variant": probe_source_variant,
                 "is_probe": True,
-                "is_placeholder": False,
+                "is_placeholder": probe_is_pending,
                 "probe_eval_setting": probe_eval_setting,
                 "raw_accuracy": probe_accuracy,
                 "norm_accuracy": probe_accuracy,
@@ -2203,6 +2390,21 @@ def main() -> None:
                 "n_examples": n_examples,
             }
         )
+
+        if probe_is_pending:
+            class_rows, direct_rows, outcome_rows, pred_mix_rows = build_probe_pending_rows(
+                run_key=run_key,
+                run_display=run_display,
+                model_family=model_family,
+                run_group=run_group,
+                variant_label=variant_label,
+                probe_source_variant=probe_source_variant,
+            )
+            class_records.extend(class_rows)
+            direct_records.extend(direct_rows)
+            outcome_records.extend(outcome_rows)
+            prediction_mix_records.extend(pred_mix_rows)
+            continue
 
         summary_like = build_probe_summary_like(probe_vs_gold, n_examples)
         class_records.extend(

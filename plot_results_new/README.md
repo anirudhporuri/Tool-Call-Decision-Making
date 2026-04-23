@@ -35,7 +35,10 @@ For probe runs, only the **single best-performing layer** is kept per run
 (selected by highest probe accuracy, with macro-F1 as tiebreaker).
 
 To justify that choice, the pipeline also exports probe-only layer comparisons
-for **all** probed layers and marks the chosen layer as `BEST`.
+for **all** probed layers and records the selected layer + reason in tables/CSVs.
+
+Probe runs sourced from corrupted `Prompting 4-shot` probe evaluations are
+treated as pending placeholders and shown as `PENDING`.
 
 ## Placeholders (Gemma CAI pending)
 
@@ -65,6 +68,8 @@ Disable placeholders with `--no-placeholders`.
 - `normalized_prediction_mix_by_run_without_probe.pdf`
 - `probe_layer_accuracy_comparison.pdf`
 - `probe_layer_macro_f1_comparison.pdf`
+- `probe_layer_macro_precision_comparison.pdf`
+- `probe_layer_macro_recall_comparison.pdf`
 
 No heatmaps are generated.
 
