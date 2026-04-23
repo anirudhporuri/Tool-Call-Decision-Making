@@ -1,0 +1,182 @@
+{
+  "label_names": [
+    "tool_call",
+    "request_for_info",
+    "cannot_answer"
+  ],
+  "layer_specs": [
+    {
+      "tag": "middle",
+      "transformer_layer": 14,
+      "hidden_state_index": 14
+    },
+    {
+      "tag": "layer_75pct",
+      "transformer_layer": 21,
+      "hidden_state_index": 21
+    },
+    {
+      "tag": "last",
+      "transformer_layer": 28,
+      "hidden_state_index": 28
+    }
+  ],
+  "layers": {
+    "middle": {
+      "label_names": [
+        "tool_call",
+        "request_for_info",
+        "cannot_answer"
+      ],
+      "num_train_examples": 9000,
+      "hidden_size": 3072,
+      "dev_size": 0.2,
+      "random_seed": 42,
+      "c_values_tried": [
+        0.01,
+        0.1,
+        1.0,
+        10.0,
+        100.0
+      ],
+      "dev_results": [
+        {
+          "C": 0.01,
+          "dev_accuracy": 0.9183333333333333,
+          "dev_macro_f1": 0.9186676580075227
+        },
+        {
+          "C": 0.1,
+          "dev_accuracy": 0.9122222222222223,
+          "dev_macro_f1": 0.9126141242997315
+        },
+        {
+          "C": 1.0,
+          "dev_accuracy": 0.9061111111111111,
+          "dev_macro_f1": 0.9065023903558159
+        },
+        {
+          "C": 10.0,
+          "dev_accuracy": 0.9055555555555556,
+          "dev_macro_f1": 0.9058702740740124
+        },
+        {
+          "C": 100.0,
+          "dev_accuracy": 0.9033333333333333,
+          "dev_macro_f1": 0.9037477006453046
+        }
+      ],
+      "best_hparams": {
+        "C": 0.01,
+        "dev_accuracy": 0.9183333333333333,
+        "dev_macro_f1": 0.9186676580075227
+      },
+      "transformer_layer": 14,
+      "hidden_state_index": 14
+    },
+    "layer_75pct": {
+      "label_names": [
+        "tool_call",
+        "request_for_info",
+        "cannot_answer"
+      ],
+      "num_train_examples": 9000,
+      "hidden_size": 3072,
+      "dev_size": 0.2,
+      "random_seed": 42,
+      "c_values_tried": [
+        0.01,
+        0.1,
+        1.0,
+        10.0,
+        100.0
+      ],
+      "dev_results": [
+        {
+          "C": 0.01,
+          "dev_accuracy": 0.925,
+          "dev_macro_f1": 0.9253368408744969
+        },
+        {
+          "C": 0.1,
+          "dev_accuracy": 0.9116666666666666,
+          "dev_macro_f1": 0.9121189184147483
+        },
+        {
+          "C": 1.0,
+          "dev_accuracy": 0.9022222222222223,
+          "dev_macro_f1": 0.9027109093023612
+        },
+        {
+          "C": 10.0,
+          "dev_accuracy": 0.9077777777777778,
+          "dev_macro_f1": 0.9080795854091085
+        },
+        {
+          "C": 100.0,
+          "dev_accuracy": 0.9072222222222223,
+          "dev_macro_f1": 0.9077031740335223
+        }
+      ],
+      "best_hparams": {
+        "C": 0.01,
+        "dev_accuracy": 0.925,
+        "dev_macro_f1": 0.9253368408744969
+      },
+      "transformer_layer": 21,
+      "hidden_state_index": 21
+    },
+    "last": {
+      "label_names": [
+        "tool_call",
+        "request_for_info",
+        "cannot_answer"
+      ],
+      "num_train_examples": 9000,
+      "hidden_size": 3072,
+      "dev_size": 0.2,
+      "random_seed": 42,
+      "c_values_tried": [
+        0.01,
+        0.1,
+        1.0,
+        10.0,
+        100.0
+      ],
+      "dev_results": [
+        {
+          "C": 0.01,
+          "dev_accuracy": 0.9166666666666666,
+          "dev_macro_f1": 0.916964302698766
+        },
+        {
+          "C": 0.1,
+          "dev_accuracy": 0.9111111111111111,
+          "dev_macro_f1": 0.9113235163408326
+        },
+        {
+          "C": 1.0,
+          "dev_accuracy": 0.9044444444444445,
+          "dev_macro_f1": 0.9046634389497483
+        },
+        {
+          "C": 10.0,
+          "dev_accuracy": 0.9022222222222223,
+          "dev_macro_f1": 0.9027390686933412
+        },
+        {
+          "C": 100.0,
+          "dev_accuracy": 0.9027777777777778,
+          "dev_macro_f1": 0.9031866235222962
+        }
+      ],
+      "best_hparams": {
+        "C": 0.01,
+        "dev_accuracy": 0.9166666666666666,
+        "dev_macro_f1": 0.916964302698766
+      },
+      "transformer_layer": 28,
+      "hidden_state_index": 28
+    }
+  }
+}

@@ -27,6 +27,22 @@ llama_self_full_dpo_from_sft_model_eval,Llama CAI DPO (From SFT),llama,CAI,DPO (
 llama_self_full_dpo_from_sft_model_eval,Llama CAI DPO (From SFT),llama,CAI,DPO (From SFT),n/a,False,False,fixed,408,0.11171960569550932,0,2,2,99,99
 llama_self_full_dpo_from_sft_model_eval,Llama CAI DPO (From SFT),llama,CAI,DPO (From SFT),n/a,False,False,broken,51,0.013964950711938665,0,2,2,99,99
 llama_self_full_dpo_from_sft_model_eval,Llama CAI DPO (From SFT),llama,CAI,DPO (From SFT),n/a,False,False,stay_wrong,1841,0.5041073384446878,0,2,2,99,99
+llama32_3b_probe_base:middle,Llama Probe Prompting Zero-shot (Middle layer),llama,Probe,Middle layer,Prompting Zero-shot,True,False,stay_correct,1999,0.5473713033953997,0,3,6,0,99
+llama32_3b_probe_base:middle,Llama Probe Prompting Zero-shot (Middle layer),llama,Probe,Middle layer,Prompting Zero-shot,True,False,fixed,0,0.0,0,3,6,0,99
+llama32_3b_probe_base:middle,Llama Probe Prompting Zero-shot (Middle layer),llama,Probe,Middle layer,Prompting Zero-shot,True,False,broken,0,0.0,0,3,6,0,99
+llama32_3b_probe_base:middle,Llama Probe Prompting Zero-shot (Middle layer),llama,Probe,Middle layer,Prompting Zero-shot,True,False,stay_wrong,1653,0.4526286966046002,0,3,6,0,99
+llama32_3b_probe_4shot:middle,Llama Probe Prompting 4-shot (Middle layer),llama,Probe,Middle layer,Prompting 4-shot,True,False,stay_correct,1295,0.3546002190580504,0,3,6,1,99
+llama32_3b_probe_4shot:middle,Llama Probe Prompting 4-shot (Middle layer),llama,Probe,Middle layer,Prompting 4-shot,True,False,fixed,0,0.0,0,3,6,1,99
+llama32_3b_probe_4shot:middle,Llama Probe Prompting 4-shot (Middle layer),llama,Probe,Middle layer,Prompting 4-shot,True,False,broken,0,0.0,0,3,6,1,99
+llama32_3b_probe_4shot:middle,Llama Probe Prompting 4-shot (Middle layer),llama,Probe,Middle layer,Prompting 4-shot,True,False,stay_wrong,2357,0.6453997809419496,0,3,6,1,99
+llama32_3b_sft_probe:layer_75pct,Llama Probe Post-Training SFT (75% depth layer),llama,Probe,75% depth layer,Post-Training SFT,True,False,stay_correct,2241,0.6136363636363636,0,3,7,2,99
+llama32_3b_sft_probe:layer_75pct,Llama Probe Post-Training SFT (75% depth layer),llama,Probe,75% depth layer,Post-Training SFT,True,False,fixed,0,0.0,0,3,7,2,99
+llama32_3b_sft_probe:layer_75pct,Llama Probe Post-Training SFT (75% depth layer),llama,Probe,75% depth layer,Post-Training SFT,True,False,broken,0,0.0,0,3,7,2,99
+llama32_3b_sft_probe:layer_75pct,Llama Probe Post-Training SFT (75% depth layer),llama,Probe,75% depth layer,Post-Training SFT,True,False,stay_wrong,1411,0.38636363636363635,0,3,7,2,99
+llama32_3b_dpo_probe:last,Llama Probe Post-Training DPO (Last layer),llama,Probe,Last layer,Post-Training DPO,True,False,stay_correct,2020,0.5531215772179627,0,3,8,3,99
+llama32_3b_dpo_probe:last,Llama Probe Post-Training DPO (Last layer),llama,Probe,Last layer,Post-Training DPO,True,False,fixed,0,0.0,0,3,8,3,99
+llama32_3b_dpo_probe:last,Llama Probe Post-Training DPO (Last layer),llama,Probe,Last layer,Post-Training DPO,True,False,broken,0,0.0,0,3,8,3,99
+llama32_3b_dpo_probe:last,Llama Probe Post-Training DPO (Last layer),llama,Probe,Last layer,Post-Training DPO,True,False,stay_wrong,1632,0.44687842278203727,0,3,8,3,99
 gemma3_4b_zeroshot,Gemma Prompting Zero-shot,gemma,Prompting,Zero-shot,n/a,False,False,stay_correct,903,0.2472617743702081,1,0,0,99,99
 gemma3_4b_zeroshot,Gemma Prompting Zero-shot,gemma,Prompting,Zero-shot,n/a,False,False,fixed,120,0.03285870755750274,1,0,0,99,99
 gemma3_4b_zeroshot,Gemma Prompting Zero-shot,gemma,Prompting,Zero-shot,n/a,False,False,broken,188,0.05147864184008762,1,0,0,99,99
@@ -55,3 +71,19 @@ gemma_self_full_dpo_from_sft_model_eval,Gemma CAI DPO (From SFT),gemma,CAI,DPO (
 gemma_self_full_dpo_from_sft_model_eval,Gemma CAI DPO (From SFT),gemma,CAI,DPO (From SFT),n/a,False,True,fixed,0,0.0,1,2,2,99,99
 gemma_self_full_dpo_from_sft_model_eval,Gemma CAI DPO (From SFT),gemma,CAI,DPO (From SFT),n/a,False,True,broken,0,0.0,1,2,2,99,99
 gemma_self_full_dpo_from_sft_model_eval,Gemma CAI DPO (From SFT),gemma,CAI,DPO (From SFT),n/a,False,True,stay_wrong,0,0.0,1,2,2,99,99
+gemma3_4b_probe_base:layer_75pct,Gemma Probe Prompting Zero-shot (75% depth layer),gemma,Probe,75% depth layer,Prompting Zero-shot,True,False,stay_correct,1779,0.4871303395399781,1,3,7,0,99
+gemma3_4b_probe_base:layer_75pct,Gemma Probe Prompting Zero-shot (75% depth layer),gemma,Probe,75% depth layer,Prompting Zero-shot,True,False,fixed,0,0.0,1,3,7,0,99
+gemma3_4b_probe_base:layer_75pct,Gemma Probe Prompting Zero-shot (75% depth layer),gemma,Probe,75% depth layer,Prompting Zero-shot,True,False,broken,0,0.0,1,3,7,0,99
+gemma3_4b_probe_base:layer_75pct,Gemma Probe Prompting Zero-shot (75% depth layer),gemma,Probe,75% depth layer,Prompting Zero-shot,True,False,stay_wrong,1873,0.5128696604600219,1,3,7,0,99
+gemma3_4b_probe_4shot:middle,Gemma Probe Prompting 4-shot (Middle layer),gemma,Probe,Middle layer,Prompting 4-shot,True,False,stay_correct,1295,0.3546002190580504,1,3,6,1,99
+gemma3_4b_probe_4shot:middle,Gemma Probe Prompting 4-shot (Middle layer),gemma,Probe,Middle layer,Prompting 4-shot,True,False,fixed,0,0.0,1,3,6,1,99
+gemma3_4b_probe_4shot:middle,Gemma Probe Prompting 4-shot (Middle layer),gemma,Probe,Middle layer,Prompting 4-shot,True,False,broken,0,0.0,1,3,6,1,99
+gemma3_4b_probe_4shot:middle,Gemma Probe Prompting 4-shot (Middle layer),gemma,Probe,Middle layer,Prompting 4-shot,True,False,stay_wrong,2357,0.6453997809419496,1,3,6,1,99
+gemma3_4b_sft_probe:layer_75pct,Gemma Probe Post-Training SFT (75% depth layer),gemma,Probe,75% depth layer,Post-Training SFT,True,False,stay_correct,2234,0.6117196056955093,1,3,7,2,99
+gemma3_4b_sft_probe:layer_75pct,Gemma Probe Post-Training SFT (75% depth layer),gemma,Probe,75% depth layer,Post-Training SFT,True,False,fixed,0,0.0,1,3,7,2,99
+gemma3_4b_sft_probe:layer_75pct,Gemma Probe Post-Training SFT (75% depth layer),gemma,Probe,75% depth layer,Post-Training SFT,True,False,broken,0,0.0,1,3,7,2,99
+gemma3_4b_sft_probe:layer_75pct,Gemma Probe Post-Training SFT (75% depth layer),gemma,Probe,75% depth layer,Post-Training SFT,True,False,stay_wrong,1418,0.3882803943044907,1,3,7,2,99
+gemma3_4b_dpo_probe:last,Gemma Probe Post-Training DPO (Last layer),gemma,Probe,Last layer,Post-Training DPO,True,False,stay_correct,1873,0.5128696604600219,1,3,8,3,99
+gemma3_4b_dpo_probe:last,Gemma Probe Post-Training DPO (Last layer),gemma,Probe,Last layer,Post-Training DPO,True,False,fixed,0,0.0,1,3,8,3,99
+gemma3_4b_dpo_probe:last,Gemma Probe Post-Training DPO (Last layer),gemma,Probe,Last layer,Post-Training DPO,True,False,broken,0,0.0,1,3,8,3,99
+gemma3_4b_dpo_probe:last,Gemma Probe Post-Training DPO (Last layer),gemma,Probe,Last layer,Post-Training DPO,True,False,stay_wrong,1779,0.4871303395399781,1,3,8,3,99

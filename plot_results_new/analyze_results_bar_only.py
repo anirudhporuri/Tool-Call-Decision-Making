@@ -459,6 +459,36 @@ def build_probe_summary_like(layer_metrics: Dict[str, Any], n_examples: int) -> 
     }
 
 
+def probe_layer_score(layer_payload: Dict[str, Any]) -> Tuple[float, float]:
+    probe_vs_gold = layer_payload.get("probe_vs_gold") or {}
+    if not probe_vs_gold:
+        return -1.0, -1.0
+    accuracy = float(probe_vs_gold.get("accuracy", 0.0) or 0.0)
+    macro_f1 = float(
+        probe_vs_gold.get(
+            "macro_f1",
+            (probe_vs_gold.get("classification_report", {}) or {}).get("macro avg", {}).get("f1-score", 0.0),
+        )
+        or 0.0
+    )
+    return accuracy, macro_f1
+
+
+def select_best_probe_layer(layers: Dict[str, Dict[str, Any]], layer_order: Sequence[str]) -> str | None:
+    candidates = [tag for tag in layer_order if tag in layers]
+    if not candidates:
+        candidates = sorted(layers.keys())
+
+    best_tag: str | None = None
+    best_score = (-1.0, -1.0)
+    for layer_tag in candidates:
+        score = probe_layer_score(layers.get(layer_tag) or {})
+        if score > best_score:
+            best_tag = layer_tag
+            best_score = score
+    return best_tag
+
+
 def extract_class_metrics(
     *,
     run_key: str,
@@ -892,6 +922,8 @@ def make_bar_plots(
     )
     runs_plot["norm_accuracy_label_pos"] = runs_plot["norm_accuracy"] + 0.03
     runs_plot["norm_macro_f1_label_pos"] = runs_plot["norm_macro_f1"] + 0.03
+    no_probe_runs = runs_plot[~runs_plot["is_probe"].fillna(False)].copy()
+    no_probe_order = no_probe_runs["run_display"].tolist()
 
     accuracy_plot = (
         ggplot(runs_plot, aes(x="run_display", y="norm_accuracy", fill="fill_group"))
@@ -919,7 +951,6 @@ def make_bar_plots(
     )
     save_plot_multi(macrof1_plot, figures_dir=figures_dir, base_name="normalized_macro_f1_by_run", width=11, height=6)
 
-    no_probe_runs = runs_plot[~runs_plot["is_probe"].fillna(False)].copy()
     if not no_probe_runs.empty:
         no_probe_runs["norm_accuracy_label_pos"] = no_probe_runs["norm_accuracy"] + 0.03
         no_probe_runs["norm_macro_f1_label_pos"] = no_probe_runs["norm_macro_f1"] + 0.03
@@ -1014,6 +1045,41 @@ def make_bar_plots(
                 height=7,
             )
 
+            class_no_probe_df = class_plot_df[~class_plot_df["is_probe"].fillna(False)].copy()
+            if not class_no_probe_df.empty:
+                class_no_probe_df = apply_run_order(class_no_probe_df, no_probe_order)
+                no_probe_class_pending = pending_annotation_df(no_probe_runs, no_probe_order, y_value=0.03)
+                metric_no_probe_plot = (
+                    ggplot(class_no_probe_df, aes(x="run_display", y=metric_col, fill="behavior_class_display"))
+                    + geom_col(position=position_dodge(width=0.78), width=0.7)
+                    + coord_flip()
+                    + scale_fill_manual(values=PREDICTION_COLORS)
+                    + scale_y_continuous(labels=percent_format(), limits=(0.0, 1.0), breaks=[0.0, 0.2, 0.4, 0.6, 0.8, 1.0])
+                    + labs(
+                        title=f"{no_probe_scope} - {title_suffix} (Without Probe)",
+                        x="",
+                        y=y_label,
+                        fill="Class",
+                    )
+                    + theme_bw()
+                    + theme(figure_size=(12, 7), axis_text_y=element_text(size=9))
+                )
+                if not no_probe_class_pending.empty:
+                    metric_no_probe_plot = metric_no_probe_plot + geom_text(
+                        data=no_probe_class_pending,
+                        mapping=aes(x="run_display", y="y", label="label"),
+                        inherit_aes=False,
+                        color="#6c757d",
+                        size=9,
+                    )
+                save_plot_multi(
+                    metric_no_probe_plot,
+                    figures_dir=figures_dir,
+                    base_name=f"{base_name}_without_probe",
+                    width=12,
+                    height=7,
+                )
+
     if not direct_df.empty:
         direct_plot_df = apply_run_order(direct_df, run_order)
         direct_pending = pending_annotation_df(runs_plot, run_order, y_value=0.03)
@@ -1050,6 +1116,41 @@ def make_bar_plots(
             height=6,
         )
 
+        direct_no_probe_df = direct_df[~direct_df["is_probe"].fillna(False)].copy()
+        if not direct_no_probe_df.empty:
+            direct_no_probe_df = apply_run_order(direct_no_probe_df, no_probe_order)
+            no_probe_direct_pending = pending_annotation_df(no_probe_runs, no_probe_order, y_value=0.03)
+            no_probe_direct_rate_plot = (
+                ggplot(direct_no_probe_df, aes(x="run_display", y="direct_prediction_rate", fill="scoring"))
+                + geom_col(position=position_dodge(width=0.75), width=0.68)
+                + coord_flip()
+                + scale_fill_manual(values=SCORING_COLORS)
+                + scale_y_continuous(labels=percent_format(), limits=(0.0, 1.0), breaks=[0.0, 0.2, 0.4, 0.6, 0.8, 1.0])
+                + labs(
+                    title=f"{no_probe_scope} - Unsupported 'direct' Prediction Rate (Without Probe)",
+                    x="",
+                    y="Rate",
+                    fill="Scoring",
+                )
+                + theme_bw()
+                + theme(figure_size=(11, 6), axis_text_y=element_text(size=9))
+            )
+            if not no_probe_direct_pending.empty:
+                no_probe_direct_rate_plot = no_probe_direct_rate_plot + geom_text(
+                    data=no_probe_direct_pending,
+                    mapping=aes(x="run_display", y="y", label="label"),
+                    inherit_aes=False,
+                    color="#6c757d",
+                    size=9,
+                )
+            save_plot_multi(
+                no_probe_direct_rate_plot,
+                figures_dir=figures_dir,
+                base_name="unsupported_direct_prediction_rate_by_run_without_probe",
+                width=11,
+                height=6,
+            )
+
     if not outcome_df.empty:
         outcome_plot_df = apply_run_order(outcome_df, run_order)
         outcome_pending = pending_annotation_df(runs_plot, run_order, y_value=0.05)
@@ -1085,6 +1186,41 @@ def make_bar_plots(
             width=11,
             height=6,
         )
+
+        outcome_no_probe_df = outcome_df[~outcome_df["is_probe"].fillna(False)].copy()
+        if not outcome_no_probe_df.empty:
+            outcome_no_probe_df = apply_run_order(outcome_no_probe_df, no_probe_order)
+            no_probe_outcome_pending = pending_annotation_df(no_probe_runs, no_probe_order, y_value=0.05)
+            no_probe_outcome_plot = (
+                ggplot(outcome_no_probe_df, aes(x="run_display", y="fraction", fill="outcome"))
+                + geom_col(width=0.75)
+                + coord_flip()
+                + scale_fill_manual(values=OUTCOME_COLORS)
+                + scale_y_continuous(labels=percent_format(), limits=(0.0, 1.0), breaks=[0.0, 0.2, 0.4, 0.6, 0.8, 1.0])
+                + labs(
+                    title=f"{no_probe_scope} - Normalization Outcome Breakdown (Without Probe)",
+                    x="",
+                    y="Fraction of Examples",
+                    fill="Outcome",
+                )
+                + theme_bw()
+                + theme(figure_size=(11, 6), axis_text_y=element_text(size=9))
+            )
+            if not no_probe_outcome_pending.empty:
+                no_probe_outcome_plot = no_probe_outcome_plot + geom_text(
+                    data=no_probe_outcome_pending,
+                    mapping=aes(x="run_display", y="y", label="label"),
+                    inherit_aes=False,
+                    color="#6c757d",
+                    size=9,
+                )
+            save_plot_multi(
+                no_probe_outcome_plot,
+                figures_dir=figures_dir,
+                base_name="normalization_outcome_breakdown_by_run_without_probe",
+                width=11,
+                height=6,
+            )
 
     if not prediction_mix_df.empty:
         pred_mix_df = prediction_mix_df[prediction_mix_df["scoring"] == "normalized"].copy()
@@ -1127,10 +1263,9 @@ def make_bar_plots(
 
             no_probe_pred_mix = pred_mix_df[~pred_mix_df["is_probe"].fillna(False)].copy()
             if not no_probe_pred_mix.empty:
-                no_probe_order = runs_plot[~runs_plot["is_probe"].fillna(False)]["run_display"].tolist()
                 no_probe_pred_mix = apply_run_order(no_probe_pred_mix, no_probe_order)
                 no_probe_pending = pending_annotation_df(
-                    runs_plot[~runs_plot["is_probe"].fillna(False)],
+                    no_probe_runs,
                     no_probe_order,
                     y_value=0.05,
                 )
@@ -1281,91 +1416,89 @@ def main() -> None:
         probe_samples_path = probe_dir / "probe_comparison_samples.jsonl"
         probe_samples = read_jsonl(probe_samples_path) if probe_samples_path.exists() else []
 
-        for layer_tag in layer_order:
-            layer_payload = layers.get(layer_tag) or {}
-            probe_vs_gold = layer_payload.get("probe_vs_gold") or {}
-            if not probe_vs_gold:
-                continue
+        best_layer_tag = select_best_probe_layer(layers, layer_order)
+        if best_layer_tag is None:
+            continue
 
-            variant_label = infer_probe_variant_label(layer_tag)
-            run_key = f"{probe_dir.name}:{layer_tag}"
-            run_display = make_probe_run_display(
-                family_short,
-                probe_eval_setting,
-                variant_label,
+        layer_payload = layers.get(best_layer_tag) or {}
+        probe_vs_gold = layer_payload.get("probe_vs_gold") or {}
+        if not probe_vs_gold:
+            continue
+
+        variant_label = infer_probe_variant_label(best_layer_tag)
+        run_key = f"{probe_dir.name}:{best_layer_tag}"
+        run_display = make_probe_run_display(
+            family_short,
+            probe_eval_setting,
+            variant_label,
+            probe_source_variant=probe_source_variant,
+        )
+        n_examples = int(probe_eval.get("num_joined_examples", 0) or 0)
+        probe_accuracy, probe_macro_f1 = probe_layer_score(layer_payload)
+
+        run_records.append(
+            {
+                "run_key": run_key,
+                "run_display": run_display,
+                "model_family": model_family,
+                "run_group": run_group,
+                "variant_label": variant_label,
+                "probe_source_variant": probe_source_variant,
+                "is_probe": True,
+                "is_placeholder": False,
+                "probe_eval_setting": probe_eval_setting,
+                "raw_accuracy": probe_accuracy,
+                "norm_accuracy": probe_accuracy,
+                "raw_macro_f1": probe_macro_f1,
+                "norm_macro_f1": probe_macro_f1,
+                "n_examples": n_examples,
+            }
+        )
+
+        summary_like = build_probe_summary_like(probe_vs_gold, n_examples)
+        class_records.extend(
+            extract_class_metrics(
+                run_key=run_key,
+                run_display=run_display,
+                model_family=model_family,
+                run_group=run_group,
+                variant_label=variant_label,
                 probe_source_variant=probe_source_variant,
+                summary=summary_like,
+                is_probe=True,
+                is_placeholder=False,
             )
-            n_examples = int(probe_eval.get("num_joined_examples", 0) or 0)
-            probe_accuracy = float(probe_vs_gold.get("accuracy", 0.0) or 0.0)
-            probe_macro_f1 = float(
-                probe_vs_gold.get(
-                    "macro_f1",
-                    (probe_vs_gold.get("classification_report", {}) or {}).get("macro avg", {}).get("f1-score", 0.0),
+        )
+
+        if probe_samples:
+            layer_samples: List[Dict[str, Any]] = []
+            for sample in probe_samples:
+                probe_pred = (sample.get("probe_preds") or {}).get(best_layer_tag)
+                if probe_pred is None:
+                    continue
+                layer_samples.append(
+                    {
+                        "gold": sample.get("gold"),
+                        "pred_raw": probe_pred,
+                        "pred_norm": probe_pred,
+                    }
                 )
-                or 0.0
-            )
-
-            run_records.append(
-                {
-                    "run_key": run_key,
-                    "run_display": run_display,
-                    "model_family": model_family,
-                    "run_group": run_group,
-                    "variant_label": variant_label,
-                    "probe_source_variant": probe_source_variant,
-                    "is_probe": True,
-                    "is_placeholder": False,
-                    "probe_eval_setting": probe_eval_setting,
-                    "raw_accuracy": probe_accuracy,
-                    "norm_accuracy": probe_accuracy,
-                    "raw_macro_f1": probe_macro_f1,
-                    "norm_macro_f1": probe_macro_f1,
-                    "n_examples": n_examples,
-                }
-            )
-
-            summary_like = build_probe_summary_like(probe_vs_gold, n_examples)
-            class_records.extend(
-                extract_class_metrics(
+            if layer_samples:
+                direct_rows, outcome_rows, pred_mix_rows = extract_sample_level_summaries(
                     run_key=run_key,
                     run_display=run_display,
                     model_family=model_family,
                     run_group=run_group,
                     variant_label=variant_label,
                     probe_source_variant=probe_source_variant,
-                    summary=summary_like,
+                    samples=layer_samples,
+                    label_order=summary_like.get("label_order") or DEFAULT_LABEL_ORDER,
                     is_probe=True,
                     is_placeholder=False,
                 )
-            )
-
-            if probe_samples:
-                layer_samples: List[Dict[str, Any]] = []
-                for sample in probe_samples:
-                    probe_pred = (sample.get("probe_preds") or {}).get(layer_tag)
-                    if probe_pred is None:
-                        continue
-                    layer_samples.append(
-                        {
-                            "gold": sample.get("gold"),
-                            "pred_raw": probe_pred,
-                            "pred_norm": probe_pred,
-                        }
-                    )
-                if layer_samples:
-                    _, _, pred_mix_rows = extract_sample_level_summaries(
-                        run_key=run_key,
-                        run_display=run_display,
-                        model_family=model_family,
-                        run_group=run_group,
-                        variant_label=variant_label,
-                        probe_source_variant=probe_source_variant,
-                        samples=layer_samples,
-                        label_order=summary_like.get("label_order") or DEFAULT_LABEL_ORDER,
-                        is_probe=True,
-                        is_placeholder=False,
-                    )
-                    prediction_mix_records.extend(pred_mix_rows)
+                direct_records.extend(direct_rows)
+                outcome_records.extend(outcome_rows)
+                prediction_mix_records.extend(pred_mix_rows)
 
     runs_df = pd.DataFrame(run_records, columns=RUN_COLUMNS)
     class_df = pd.DataFrame(class_records, columns=CLASS_COLUMNS)

@@ -31,6 +31,9 @@ Example labels:
 - `Llama CAI DPO (From SFT)`
 - `Llama Probe Post-Training DPO (Middle layer)`
 
+For probe runs, only the **single best-performing layer** is kept per run
+(selected by highest probe accuracy, with macro-F1 as tiebreaker).
+
 ## Placeholders (Gemma CAI pending)
 
 If Gemma CAI runs are missing, placeholder rows are injected by default for expected run keys, and affected bars are marked `PENDING`.
@@ -44,11 +47,17 @@ Disable placeholders with `--no-placeholders`.
 - `normalized_accuracy_by_run_without_probe.pdf`
 - `normalized_macro_f1_by_run_without_probe.pdf`
 - `per_class_accuracy_bar_by_run.pdf`
+- `per_class_accuracy_bar_by_run_without_probe.pdf`
 - `per_class_precision_bar_by_run.pdf`
+- `per_class_precision_bar_by_run_without_probe.pdf`
 - `per_class_recall_bar_by_run.pdf`
+- `per_class_recall_bar_by_run_without_probe.pdf`
 - `per_class_f1_bar_by_run.pdf`
+- `per_class_f1_bar_by_run_without_probe.pdf`
 - `unsupported_direct_prediction_rate_by_run.pdf`
+- `unsupported_direct_prediction_rate_by_run_without_probe.pdf`
 - `normalization_outcome_breakdown_by_run.pdf`
+- `normalization_outcome_breakdown_by_run_without_probe.pdf`
 - `normalized_prediction_mix_by_run.pdf`
 - `normalized_prediction_mix_by_run_without_probe.pdf`
 

@@ -1,7 +1,7 @@
 # Bar-Only Analysis Summary
 
-- Generated: **2026-04-23 18:22:26**
-- Runs analyzed: **38**
+- Generated: **2026-04-23 18:41:46**
+- Runs analyzed: **22**
 - Placeholder runs injected: **2**
 
 ## Pending Gemma CAI Placeholders
