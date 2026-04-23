@@ -932,7 +932,7 @@ def make_bar_plots(
         + coord_flip()
         + scale_fill_manual(values=FAMILY_COLORS)
         + scale_y_continuous(labels=percent_format(), limits=(0.0, 1.08), breaks=[0.0, 0.2, 0.4, 0.6, 0.8, 1.0])
-        + labs(title=f"Normalized Accuracy on When2Call {all_runs_suffix}", x="", y="Accuracy", fill="Model Family")
+        + labs(title=f"Accuracy on When2Call {all_runs_suffix}", x="", y="Accuracy", fill="Model Family")
         + theme_bw()
         + theme(figure_size=(11, 6), axis_text_y=element_text(size=9))
     )
@@ -945,7 +945,7 @@ def make_bar_plots(
         + coord_flip()
         + scale_fill_manual(values=FAMILY_COLORS)
         + scale_y_continuous(labels=percent_format(), limits=(0.0, 1.08), breaks=[0.0, 0.2, 0.4, 0.6, 0.8, 1.0])
-        + labs(title=f"Normalized Macro-F1 on When2Call {all_runs_suffix}", x="", y="Macro-F1", fill="Model Family")
+        + labs(title=f"Macro-F1 on When2Call {all_runs_suffix}", x="", y="Macro-F1", fill="Model Family")
         + theme_bw()
         + theme(figure_size=(11, 6), axis_text_y=element_text(size=9))
     )
@@ -963,7 +963,7 @@ def make_bar_plots(
             + scale_fill_manual(values=FAMILY_COLORS)
             + scale_y_continuous(labels=percent_format(), limits=(0.0, 1.08), breaks=[0.0, 0.2, 0.4, 0.6, 0.8, 1.0])
             + labs(
-                title=f"Normalized Accuracy on When2Call {no_probe_suffix}",
+                title=f"Accuracy on When2Call {no_probe_suffix}",
                 x="",
                 y="Accuracy",
                 fill="Model Family",
@@ -987,7 +987,7 @@ def make_bar_plots(
             + scale_fill_manual(values=FAMILY_COLORS)
             + scale_y_continuous(labels=percent_format(), limits=(0.0, 1.08), breaks=[0.0, 0.2, 0.4, 0.6, 0.8, 1.0])
             + labs(
-                title=f"Normalized Macro-F1 on When2Call {no_probe_suffix}",
+                title=f"Macro-F1 on When2Call {no_probe_suffix}",
                 x="",
                 y="Macro-F1",
                 fill="Model Family",
@@ -1011,10 +1011,10 @@ def make_bar_plots(
         class_plot_df["behavior_class_display"] = class_plot_df["behavior_class"].map(CLASS_DISPLAY)
         class_pending = pending_annotation_df(runs_plot, run_order, y_value=0.03)
         per_class_metrics = [
-            ("accuracy", "Accuracy (One-vs-Rest)", "per_class_accuracy_bar_by_run", "Per-Class Accuracy (Normalized)"),
-            ("precision", "Precision", "per_class_precision_bar_by_run", "Per-Class Precision (Normalized)"),
-            ("recall", "Recall", "per_class_recall_bar_by_run", "Per-Class Recall (Normalized)"),
-            ("f1", "F1", "per_class_f1_bar_by_run", "Per-Class F1 (Normalized)"),
+            ("accuracy", "Accuracy (One-vs-Rest)", "per_class_accuracy_bar_by_run", "Per-Class Accuracy"),
+            ("precision", "Precision", "per_class_precision_bar_by_run", "Per-Class Precision"),
+            ("recall", "Recall", "per_class_recall_bar_by_run", "Per-Class Recall"),
+            ("f1", "F1", "per_class_f1_bar_by_run", "Per-Class F1"),
         ]
 
         for metric_col, y_label, base_name, title_suffix in per_class_metrics:
@@ -1236,7 +1236,7 @@ def make_bar_plots(
                 + scale_fill_manual(values=PREDICTION_COLORS)
                 + scale_y_continuous(labels=percent_format(), limits=(0.0, 1.0), breaks=[0.0, 0.2, 0.4, 0.6, 0.8, 1.0])
                 + labs(
-                    title=f"Normalized Prediction Mix on When2Call {all_runs_suffix}",
+                    title=f"Prediction Mix on When2Call {all_runs_suffix}",
                     x="",
                     y="Fraction of Predictions",
                     fill="Predicted Label",
@@ -1281,7 +1281,7 @@ def make_bar_plots(
                         breaks=[0.0, 0.2, 0.4, 0.6, 0.8, 1.0],
                     )
                     + labs(
-                        title=f"Normalized Prediction Mix on When2Call {no_probe_suffix}",
+                        title=f"Prediction Mix on When2Call {no_probe_suffix}",
                         x="",
                         y="Fraction of Predictions",
                         fill="Predicted Label",
