@@ -1,0 +1,21 @@
+run_key,run_display,model_family,variant_label,is_probe,is_placeholder,scoring,n_examples,direct_predictions,direct_prediction_rate,family_rank,variant_rank,probe_setting_rank
+llama32_3b_sft_zeroshot_eval,Llama SFT [llama32_3b_sft_zeroshot_eval],llama,SFT,False,False,raw,3652,16,0.004381161007667032,0,2,99
+llama32_3b_sft_zeroshot_eval,Llama SFT [llama32_3b_sft_zeroshot_eval],llama,SFT,False,False,normalized,3652,19,0.0052026286966046,0,2,99
+llama_self_full_sft_model_eval,Llama SFT [llama_self_full_sft_model_eval],llama,SFT,False,False,raw,3652,74,0.020262869660460023,0,2,99
+llama_self_full_sft_model_eval,Llama SFT [llama_self_full_sft_model_eval],llama,SFT,False,False,normalized,3652,288,0.07886089813800658,0,2,99
+llama32_3b_dpo_zeroshot_eval,Llama DPO [llama32_3b_dpo_zeroshot_eval],llama,DPO,False,False,raw,3652,69,0.018893756845564075,0,3,99
+llama32_3b_dpo_zeroshot_eval,Llama DPO [llama32_3b_dpo_zeroshot_eval],llama,DPO,False,False,normalized,3652,283,0.07749178532311063,0,3,99
+llama_self_full_dpo_base_model_eval,Llama DPO [llama_self_full_dpo_base_model_eval],llama,DPO,False,False,raw,3652,86,0.023548740416210297,0,3,99
+llama_self_full_dpo_base_model_eval,Llama DPO [llama_self_full_dpo_base_model_eval],llama,DPO,False,False,normalized,3652,433,0.11856516976998904,0,3,99
+llama_self_full_dpo_from_sft_model_eval,Llama DPO [llama_self_full_dpo_from_sft_model_eval],llama,DPO,False,False,raw,3652,77,0.02108433734939759,0,3,99
+llama_self_full_dpo_from_sft_model_eval,Llama DPO [llama_self_full_dpo_from_sft_model_eval],llama,DPO,False,False,normalized,3652,287,0.07858707557502738,0,3,99
+gemma3_4b_sft_zeroshot_eval,Gemma SFT [gemma3_4b_sft_zeroshot_eval],gemma,SFT,False,False,raw,3652,670,0.18346111719605696,1,2,99
+gemma3_4b_sft_zeroshot_eval,Gemma SFT [gemma3_4b_sft_zeroshot_eval],gemma,SFT,False,False,normalized,3652,1070,0.29299014238773274,1,2,99
+gemma_self_full_sft_model_eval,Gemma SFT [gemma_self_full_sft_model_eval],gemma,SFT,False,False,raw,3652,77,0.02108433734939759,1,2,99
+gemma_self_full_sft_model_eval,Gemma SFT [gemma_self_full_sft_model_eval],gemma,SFT,False,False,normalized,3652,154,0.04216867469879518,1,2,99
+gemma3_4b_dpo_zeroshot_eval,Gemma DPO [gemma3_4b_dpo_zeroshot_eval],gemma,DPO,False,False,raw,3652,686,0.18784227820372398,1,3,99
+gemma3_4b_dpo_zeroshot_eval,Gemma DPO [gemma3_4b_dpo_zeroshot_eval],gemma,DPO,False,False,normalized,3652,935,0.2560240963855422,1,3,99
+gemma_self_full_dpo_base_model_eval,Gemma DPO [gemma_self_full_dpo_base_model_eval],gemma,DPO,False,True,raw,0,0,0.0,1,3,99
+gemma_self_full_dpo_base_model_eval,Gemma DPO [gemma_self_full_dpo_base_model_eval],gemma,DPO,False,True,normalized,0,0,0.0,1,3,99
+gemma_self_full_dpo_from_sft_model_eval,Gemma DPO [gemma_self_full_dpo_from_sft_model_eval],gemma,DPO,False,True,raw,0,0,0.0,1,3,99
+gemma_self_full_dpo_from_sft_model_eval,Gemma DPO [gemma_self_full_dpo_from_sft_model_eval],gemma,DPO,False,True,normalized,0,0,0.0,1,3,99
