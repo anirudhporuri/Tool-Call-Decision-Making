@@ -33,20 +33,35 @@ from plotnine import (  # noqa: E402
 
 
 FAMILY_ORDER = {"llama": 0, "gemma": 1}
+RUN_GROUP_ORDER = {"Prompting": 0, "Post-Training": 1, "CAI": 2, "Probe": 3, "Unknown": 99}
 VARIANT_ORDER = {
     "Zero-shot": 0,
     "4-shot": 1,
     "SFT": 2,
     "DPO": 3,
-    "Middle layer": 4,
-    "75% depth layer": 5,
-    "Last layer": 6,
+    "DPO (Base)": 4,
+    "DPO (From SFT)": 5,
+    "Middle layer": 6,
+    "75% depth layer": 7,
+    "Last layer": 8,
+}
+GROUP_VARIANT_ORDER = {
+    "Prompting": {"Zero-shot": 0, "4-shot": 1},
+    "Post-Training": {"SFT": 0, "DPO": 1},
+    "CAI": {"SFT": 0, "DPO (Base)": 1, "DPO (From SFT)": 2, "DPO": 3},
 }
 PROBE_LAYER_DISPLAY_BY_TAG = {
     "middle": "Middle layer",
     "layer_75pct": "75% depth layer",
     "75pct": "75% depth layer",
     "last": "Last layer",
+}
+PROBE_SOURCE_ORDER = {
+    "Prompting Zero-shot": 0,
+    "Prompting 4-shot": 1,
+    "Post-Training SFT": 2,
+    "Post-Training DPO": 3,
+    "Unknown source": 99,
 }
 PROBE_SETTING_ORDER = {"n/a": -1, "Zero-shot": 0, "4-shot": 1, "Unknown": 2}
 DEFAULT_LABEL_ORDER = ["direct", "tool_call", "request_for_info", "cannot_answer"]
@@ -84,7 +99,9 @@ RUN_COLUMNS = [
     "run_key",
     "run_display",
     "model_family",
+    "run_group",
     "variant_label",
+    "probe_source_variant",
     "is_probe",
     "is_placeholder",
     "probe_eval_setting",
@@ -98,7 +115,9 @@ CLASS_COLUMNS = [
     "run_key",
     "run_display",
     "model_family",
+    "run_group",
     "variant_label",
+    "probe_source_variant",
     "is_probe",
     "is_placeholder",
     "scoring",
@@ -113,7 +132,9 @@ DIRECT_COLUMNS = [
     "run_key",
     "run_display",
     "model_family",
+    "run_group",
     "variant_label",
+    "probe_source_variant",
     "is_probe",
     "is_placeholder",
     "scoring",
@@ -125,7 +146,9 @@ OUTCOME_COLUMNS = [
     "run_key",
     "run_display",
     "model_family",
+    "run_group",
     "variant_label",
+    "probe_source_variant",
     "is_probe",
     "is_placeholder",
     "outcome",
@@ -136,7 +159,9 @@ PRED_MIX_COLUMNS = [
     "run_key",
     "run_display",
     "model_family",
+    "run_group",
     "variant_label",
+    "probe_source_variant",
     "is_probe",
     "is_placeholder",
     "scoring",
@@ -147,16 +172,24 @@ PRED_MIX_COLUMNS = [
 
 def parse_args() -> argparse.Namespace:
     repo_root = Path(__file__).resolve().parents[1]
-    default_runs_dir = repo_root / "Prompting Baselines" / "outputs"
-    default_probe_runs_dir = repo_root / "Probe Baselines" / "outputs"
+    default_runs_dir = repo_root / "hmm"
+    default_probe_runs_dir = repo_root / "hmm" / "Probe Evals"
     default_output_dir = Path(__file__).resolve().parent / "output"
 
     parser = argparse.ArgumentParser(
-        description="Bar-only analysis for prompting + probe baselines with pending Gemma CAI placeholders.",
+        description="Bar-only analysis for hmm snapshot (Prompting + Post-Training + CAI + Probe) with pending Gemma CAI placeholders.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    parser.add_argument("--runs-dir", default=str(default_runs_dir))
-    parser.add_argument("--probe-runs-dir", default=str(default_probe_runs_dir))
+    parser.add_argument(
+        "--runs-dir",
+        default=str(default_runs_dir),
+        help="Root containing hmm eval subfolders or a direct eval runs folder.",
+    )
+    parser.add_argument(
+        "--probe-runs-dir",
+        default=str(default_probe_runs_dir),
+        help="Probe runs directory or a root containing a `Probe Evals` subfolder.",
+    )
     parser.add_argument("--output-dir", default=str(default_output_dir))
     parser.add_argument(
         "--no-placeholders",
@@ -185,32 +218,61 @@ def read_jsonl(path: Path) -> List[Dict[str, Any]]:
     return rows
 
 
-def discover_run_dirs(runs_dir: Path) -> List[Path]:
-    required = {"summary.json", "run_config.json"}
-    if not runs_dir.exists():
+def infer_run_group_from_source_name(name: str) -> str:
+    key = str(name).lower()
+    if "prompting" in key:
+        return "Prompting"
+    if "post-training" in key or "post_training" in key:
+        return "Post-Training"
+    if "cai" in key:
+        return "CAI"
+    if "probe" in key:
+        return "Probe"
+    return "Unknown"
+
+
+def _discover_leaf_run_dirs(parent: Path, required: Sequence[str]) -> List[Path]:
+    if not parent.exists() or not parent.is_dir():
         return []
-    run_dirs: List[Path] = []
-    for child in runs_dir.iterdir():
+    found: List[Path] = []
+    for child in parent.iterdir():
         if not child.is_dir():
             continue
         child_files = {p.name for p in child.iterdir() if p.is_file()}
-        if required.issubset(child_files):
-            run_dirs.append(child)
-    return sorted(run_dirs)
+        if set(required).issubset(child_files):
+            found.append(child)
+    return sorted(found)
+
+
+def discover_run_dirs(runs_dir: Path) -> List[Tuple[Path, str]]:
+    required = {"summary.json", "run_config.json"}
+    if not runs_dir.exists():
+        return []
+    grouped: List[Tuple[Path, str]] = []
+    subgroup_map = {
+        "Prompting": runs_dir / "Prompting Evals",
+        "Post-Training": runs_dir / "Post-Training Evals",
+        "CAI": runs_dir / "CAI Evals",
+    }
+    has_subgroup_layout = any(path.exists() for path in subgroup_map.values())
+    if has_subgroup_layout:
+        for run_group, subgroup in subgroup_map.items():
+            for run_dir in _discover_leaf_run_dirs(subgroup, required):
+                grouped.append((run_dir, run_group))
+        return sorted(grouped, key=lambda item: (item[1], item[0].name))
+
+    inferred_group = infer_run_group_from_source_name(runs_dir.name)
+    direct = _discover_leaf_run_dirs(runs_dir, required)
+    return [(path, inferred_group) for path in direct]
 
 
 def discover_probe_dirs(probe_runs_dir: Path) -> List[Path]:
     required = {"probe_evaluation_summary.json", "run_config.json"}
     if not probe_runs_dir.exists():
         return []
-    probe_dirs: List[Path] = []
-    for child in probe_runs_dir.iterdir():
-        if not child.is_dir():
-            continue
-        child_files = {p.name for p in child.iterdir() if p.is_file()}
-        if required.issubset(child_files):
-            probe_dirs.append(child)
-    return sorted(probe_dirs)
+    if (probe_runs_dir / "Probe Evals").exists():
+        return _discover_leaf_run_dirs(probe_runs_dir / "Probe Evals", required)
+    return _discover_leaf_run_dirs(probe_runs_dir, required)
 
 
 def infer_model_family(run_key: str, run_config: Dict[str, Any]) -> str:
@@ -224,7 +286,9 @@ def infer_model_family(run_key: str, run_config: Dict[str, Any]) -> str:
     return family or "unknown"
 
 
-def infer_variant_label(run_key: str, run_config: Dict[str, Any]) -> str:
+def infer_run_group(run_key: str, run_config: Dict[str, Any], source_group: str = "Unknown") -> str:
+    if source_group in {"Prompting", "Post-Training", "CAI", "Probe"}:
+        return source_group
     haystack = " ".join(
         [
             run_key.lower(),
@@ -232,6 +296,52 @@ def infer_variant_label(run_key: str, run_config: Dict[str, Any]) -> str:
             str(run_config.get("model_name_or_path", "")).lower(),
         ]
     )
+    if "self_full" in haystack or "_model_eval" in haystack:
+        return "CAI"
+    if "sft_zeroshot_eval" in haystack or "dpo_zeroshot_eval" in haystack:
+        return "Post-Training"
+    if "probe" in haystack:
+        return "Probe"
+    if "4shot" in haystack or "4-shot" in haystack or "zeroshot" in haystack or "zero-shot" in haystack:
+        return "Prompting"
+    return "Unknown"
+
+
+def infer_eval_variant_label(run_key: str, run_config: Dict[str, Any], run_group: str) -> str:
+    haystack = " ".join(
+        [
+            run_key.lower(),
+            str(run_config.get("output_dir", "")).lower(),
+            str(run_config.get("model_name_or_path", "")).lower(),
+        ]
+    )
+
+    if run_group == "CAI":
+        if "dpo_from_sft" in haystack:
+            return "DPO (From SFT)"
+        if "dpo_base" in haystack:
+            return "DPO (Base)"
+        if "dpo" in haystack:
+            return "DPO"
+        if "sft" in haystack:
+            return "SFT"
+        return "Unknown"
+
+    if run_group == "Post-Training":
+        if "dpo" in haystack:
+            return "DPO"
+        if "sft" in haystack:
+            return "SFT"
+        return "Unknown"
+
+    num_shots = int(run_config.get("num_shots", 0) or 0)
+    if run_group == "Prompting":
+        if "4shot" in haystack or "4-shot" in haystack or num_shots == 4:
+            return "4-shot"
+        if "zeroshot" in haystack or "zero-shot" in haystack or num_shots == 0:
+            return "Zero-shot"
+        return f"{num_shots}-shot"
+
     num_shots = int(run_config.get("num_shots", 0) or 0)
     if "dpo" in haystack:
         return "DPO"
@@ -273,6 +383,29 @@ def infer_probe_eval_setting(run_key: str, run_config: Dict[str, Any]) -> str:
     return "Unknown"
 
 
+def infer_probe_source_variant(run_key: str, run_config: Dict[str, Any]) -> str:
+    eval_path = str(run_config.get("eval_samples_jsonl", "")).lower()
+    haystack = " ".join(
+        [
+            run_key.lower(),
+            eval_path,
+            str(run_config.get("output_dir", "")).lower(),
+            str(run_config.get("model_name_or_path", "")).lower(),
+        ]
+    )
+    num_shots = int(run_config.get("num_shots", 0) or 0)
+
+    if "_sft_probe" in haystack or "sft_zeroshot_eval" in haystack:
+        return "Post-Training SFT"
+    if "_dpo_probe" in haystack or "dpo_zeroshot_eval" in haystack:
+        return "Post-Training DPO"
+    if "probe_4shot" in haystack or "4shot" in haystack or "4-shot" in haystack or num_shots == 4:
+        return "Prompting 4-shot"
+    if "probe_base" in haystack or "zeroshot" in haystack or "zero-shot" in haystack or num_shots == 0:
+        return "Prompting Zero-shot"
+    return "Unknown source"
+
+
 def family_display_names(model_family: str) -> Tuple[str, str]:
     if model_family == "llama":
         return "Llama 3.2 3B", "Llama"
@@ -281,13 +414,22 @@ def family_display_names(model_family: str) -> Tuple[str, str]:
     return model_family, model_family
 
 
-def make_run_display(family_short: str, variant_label: str) -> str:
+def make_run_display(family_short: str, run_group: str, variant_label: str) -> str:
+    if run_group in {"Prompting", "Post-Training", "CAI"}:
+        return f"{family_short} {run_group} {variant_label}"
     return f"{family_short} {variant_label}"
 
 
-def make_probe_run_display(family_short: str, probe_eval_setting: str, layer_label: str) -> str:
+def make_probe_run_display(
+    family_short: str,
+    probe_eval_setting: str,
+    layer_label: str,
+    probe_source_variant: str,
+) -> str:
+    if probe_source_variant and probe_source_variant != "Unknown source":
+        return f"{family_short} Probe {probe_source_variant} ({layer_label})"
     if probe_eval_setting and probe_eval_setting != "Unknown":
-        return f"{family_short} Probe {probe_eval_setting} ({layer_label})"
+        return f"{family_short} Probe Prompting {probe_eval_setting} ({layer_label})"
     return f"{family_short} Probe ({layer_label})"
 
 
@@ -322,7 +464,9 @@ def extract_class_metrics(
     run_key: str,
     run_display: str,
     model_family: str,
+    run_group: str,
     variant_label: str,
+    probe_source_variant: str = "n/a",
     summary: Dict[str, Any],
     is_probe: bool = False,
     is_placeholder: bool = False,
@@ -352,7 +496,9 @@ def extract_class_metrics(
                     "run_key": run_key,
                     "run_display": run_display,
                     "model_family": model_family,
+                    "run_group": run_group,
                     "variant_label": variant_label,
+                    "probe_source_variant": probe_source_variant,
                     "is_probe": bool(is_probe),
                     "is_placeholder": bool(is_placeholder),
                     "scoring": scoring,
@@ -384,7 +530,9 @@ def extract_sample_level_summaries(
     run_key: str,
     run_display: str,
     model_family: str,
+    run_group: str,
     variant_label: str,
+    probe_source_variant: str = "n/a",
     samples: List[Dict[str, Any]],
     label_order: Sequence[str],
     is_probe: bool = False,
@@ -405,7 +553,9 @@ def extract_sample_level_summaries(
                 "run_key": run_key,
                 "run_display": run_display,
                 "model_family": model_family,
+                "run_group": run_group,
                 "variant_label": variant_label,
+                "probe_source_variant": probe_source_variant,
                 "is_probe": bool(is_probe),
                 "is_placeholder": bool(is_placeholder),
                 "scoring": scoring,
@@ -425,7 +575,9 @@ def extract_sample_level_summaries(
                     "run_key": run_key,
                     "run_display": run_display,
                     "model_family": model_family,
+                    "run_group": run_group,
                     "variant_label": variant_label,
+                    "probe_source_variant": probe_source_variant,
                     "is_probe": bool(is_probe),
                     "is_placeholder": bool(is_placeholder),
                     "scoring": scoring,
@@ -447,7 +599,9 @@ def extract_sample_level_summaries(
                 "run_key": run_key,
                 "run_display": run_display,
                 "model_family": model_family,
+                "run_group": run_group,
                 "variant_label": variant_label,
+                "probe_source_variant": probe_source_variant,
                 "is_probe": bool(is_probe),
                 "is_placeholder": bool(is_placeholder),
                 "outcome": outcome_name,
@@ -459,15 +613,42 @@ def extract_sample_level_summaries(
     return direct_rate_records, outcome_records, prediction_mix_records
 
 
+def variant_rank_for_group(run_group: str, variant_label: str) -> int:
+    group_order = GROUP_VARIANT_ORDER.get(run_group)
+    if group_order is not None:
+        return int(group_order.get(variant_label, 99))
+    return int(VARIANT_ORDER.get(variant_label, 99))
+
+
 def sort_runs(df: pd.DataFrame) -> pd.DataFrame:
     frame = df.copy()
     frame["family_rank"] = frame["model_family"].map(FAMILY_ORDER).fillna(99).astype(int)
-    frame["variant_rank"] = frame["variant_label"].map(VARIANT_ORDER).fillna(99).astype(int)
+    if "run_group" in frame.columns:
+        frame["run_group_rank"] = frame["run_group"].map(RUN_GROUP_ORDER).fillna(99).astype(int)
+    else:
+        frame["run_group_rank"] = 99
+
+    if {"run_group", "variant_label"}.issubset(frame.columns):
+        frame["variant_rank"] = frame.apply(
+            lambda row: variant_rank_for_group(str(row.get("run_group")), str(row.get("variant_label"))),
+            axis=1,
+        )
+    else:
+        frame["variant_rank"] = 99
+
+    if "probe_source_variant" in frame.columns:
+        frame["probe_source_rank"] = frame["probe_source_variant"].map(PROBE_SOURCE_ORDER).fillna(99).astype(int)
+    else:
+        frame["probe_source_rank"] = 99
+
     if "probe_eval_setting" in frame.columns:
         frame["probe_setting_rank"] = frame["probe_eval_setting"].map(PROBE_SETTING_ORDER).fillna(99).astype(int)
     else:
         frame["probe_setting_rank"] = 99
-    return frame.sort_values(["family_rank", "probe_setting_rank", "variant_rank", "run_key"]).reset_index(drop=True)
+
+    return frame.sort_values(
+        ["family_rank", "run_group_rank", "probe_source_rank", "probe_setting_rank", "variant_rank", "run_key"]
+    ).reset_index(drop=True)
 
 
 def enforce_unique_run_displays(
@@ -486,7 +667,7 @@ def enforce_unique_run_displays(
         run_key = str(row["run_key"])
         run_display = str(row["run_display"])
         if run_display in duplicate_labels:
-            display_map[run_key] = f"{run_display} [{run_key}]"
+            display_map[run_key] = f"{run_display} ({run_key})"
         else:
             display_map[run_key] = run_display
 
@@ -560,15 +741,22 @@ def build_placeholder_rows(missing_run_keys: Sequence[str]) -> Tuple[List[Dict[s
     _, family_short = family_display_names("gemma")
 
     for run_key in missing_run_keys:
-        variant = infer_variant_label(run_key, {"output_dir": run_key, "model_name_or_path": run_key, "num_shots": 0})
-        display = make_run_display(family_short, variant)
+        run_group = "CAI"
+        variant = infer_eval_variant_label(
+            run_key,
+            {"output_dir": run_key, "model_name_or_path": run_key, "num_shots": 0},
+            run_group=run_group,
+        )
+        display = make_run_display(family_short, run_group, variant)
 
         run_rows.append(
             {
                 "run_key": run_key,
                 "run_display": display,
                 "model_family": "gemma",
+                "run_group": run_group,
                 "variant_label": variant,
+                "probe_source_variant": "n/a",
                 "is_probe": False,
                 "is_placeholder": True,
                 "probe_eval_setting": "n/a",
@@ -586,7 +774,9 @@ def build_placeholder_rows(missing_run_keys: Sequence[str]) -> Tuple[List[Dict[s
                     "run_key": run_key,
                     "run_display": display,
                     "model_family": "gemma",
+                    "run_group": run_group,
                     "variant_label": variant,
+                    "probe_source_variant": "n/a",
                     "is_probe": False,
                     "is_placeholder": True,
                     "scoring": scoring,
@@ -601,7 +791,9 @@ def build_placeholder_rows(missing_run_keys: Sequence[str]) -> Tuple[List[Dict[s
                         "run_key": run_key,
                         "run_display": display,
                         "model_family": "gemma",
+                        "run_group": run_group,
                         "variant_label": variant,
+                        "probe_source_variant": "n/a",
                         "is_probe": False,
                         "is_placeholder": True,
                         "scoring": scoring,
@@ -616,7 +808,9 @@ def build_placeholder_rows(missing_run_keys: Sequence[str]) -> Tuple[List[Dict[s
                     "run_key": run_key,
                     "run_display": display,
                     "model_family": "gemma",
+                    "run_group": run_group,
                     "variant_label": variant,
+                    "probe_source_variant": "n/a",
                     "is_probe": False,
                     "is_placeholder": True,
                     "outcome": outcome,
@@ -632,7 +826,9 @@ def build_placeholder_rows(missing_run_keys: Sequence[str]) -> Tuple[List[Dict[s
                         "run_key": run_key,
                         "run_display": display,
                         "model_family": "gemma",
+                        "run_group": run_group,
                         "variant_label": variant,
+                        "probe_source_variant": "n/a",
                         "is_probe": False,
                         "is_placeholder": True,
                         "scoring": scoring,
@@ -678,6 +874,8 @@ def make_bar_plots(
 ) -> None:
     run_order = runs_df["run_display"].tolist()
     runs_plot = apply_run_order(runs_df, run_order)
+    full_scope = "When2Call (hmm): Prompting + Post-Training + CAI + Probe"
+    no_probe_scope = "When2Call (hmm): Prompting + Post-Training + CAI"
 
     runs_plot["fill_group"] = runs_plot.apply(
         lambda row: "pending" if bool(row["is_placeholder"]) else str(row["model_family"]),
@@ -702,7 +900,7 @@ def make_bar_plots(
         + coord_flip()
         + scale_fill_manual(values=FAMILY_COLORS)
         + scale_y_continuous(labels=percent_format(), limits=(0.0, 1.08), breaks=[0.0, 0.2, 0.4, 0.6, 0.8, 1.0])
-        + labs(title="Normalized Accuracy by Run", x="", y="Accuracy", fill="Model Family")
+        + labs(title=f"{full_scope} - Normalized Accuracy by Run", x="", y="Accuracy", fill="Model Family")
         + theme_bw()
         + theme(figure_size=(11, 6), axis_text_y=element_text(size=9))
     )
@@ -715,7 +913,7 @@ def make_bar_plots(
         + coord_flip()
         + scale_fill_manual(values=FAMILY_COLORS)
         + scale_y_continuous(labels=percent_format(), limits=(0.0, 1.08), breaks=[0.0, 0.2, 0.4, 0.6, 0.8, 1.0])
-        + labs(title="Normalized Macro-F1 by Run", x="", y="Macro-F1", fill="Model Family")
+        + labs(title=f"{full_scope} - Normalized Macro-F1 by Run", x="", y="Macro-F1", fill="Model Family")
         + theme_bw()
         + theme(figure_size=(11, 6), axis_text_y=element_text(size=9))
     )
@@ -733,7 +931,12 @@ def make_bar_plots(
             + coord_flip()
             + scale_fill_manual(values=FAMILY_COLORS)
             + scale_y_continuous(labels=percent_format(), limits=(0.0, 1.08), breaks=[0.0, 0.2, 0.4, 0.6, 0.8, 1.0])
-            + labs(title="Normalized Accuracy by Run (Without Probe)", x="", y="Accuracy", fill="Model Family")
+            + labs(
+                title=f"{no_probe_scope} - Normalized Accuracy by Run (Without Probe)",
+                x="",
+                y="Accuracy",
+                fill="Model Family",
+            )
             + theme_bw()
             + theme(figure_size=(11, 6), axis_text_y=element_text(size=9))
         )
@@ -752,7 +955,12 @@ def make_bar_plots(
             + coord_flip()
             + scale_fill_manual(values=FAMILY_COLORS)
             + scale_y_continuous(labels=percent_format(), limits=(0.0, 1.08), breaks=[0.0, 0.2, 0.4, 0.6, 0.8, 1.0])
-            + labs(title="Normalized Macro-F1 by Run (Without Probe)", x="", y="Macro-F1", fill="Model Family")
+            + labs(
+                title=f"{no_probe_scope} - Normalized Macro-F1 by Run (Without Probe)",
+                x="",
+                y="Macro-F1",
+                fill="Model Family",
+            )
             + theme_bw()
             + theme(figure_size=(11, 6), axis_text_y=element_text(size=9))
         )
@@ -771,33 +979,40 @@ def make_bar_plots(
         class_plot_df = apply_run_order(class_plot_df, run_order)
         class_plot_df["behavior_class_display"] = class_plot_df["behavior_class"].map(CLASS_DISPLAY)
         class_pending = pending_annotation_df(runs_plot, run_order, y_value=0.03)
+        per_class_metrics = [
+            ("accuracy", "Accuracy (One-vs-Rest)", "per_class_accuracy_bar_by_run", "Per-Class Accuracy by Run (Normalized)"),
+            ("precision", "Precision", "per_class_precision_bar_by_run", "Per-Class Precision by Run (Normalized)"),
+            ("recall", "Recall", "per_class_recall_bar_by_run", "Per-Class Recall by Run (Normalized)"),
+            ("f1", "F1", "per_class_f1_bar_by_run", "Per-Class F1 by Run (Normalized)"),
+        ]
 
-        class_accuracy_bar = (
-            ggplot(class_plot_df, aes(x="run_display", y="accuracy", fill="behavior_class_display"))
-            + geom_col(position=position_dodge(width=0.78), width=0.7)
-            + coord_flip()
-            + scale_fill_manual(values=PREDICTION_COLORS)
-            + scale_y_continuous(labels=percent_format(), limits=(0.0, 1.0), breaks=[0.0, 0.2, 0.4, 0.6, 0.8, 1.0])
-            + labs(title="Per-Class Accuracy by Run", x="", y="Accuracy (One-vs-Rest)", fill="Class")
-            + theme_bw()
-            + theme(figure_size=(12, 7), axis_text_y=element_text(size=9))
-        )
-        if not class_pending.empty:
-            class_accuracy_bar = class_accuracy_bar + geom_text(
-                data=class_pending,
-                mapping=aes(x="run_display", y="y", label="label"),
-                inherit_aes=False,
-                color="#6c757d",
-                size=9,
+        for metric_col, y_label, base_name, title_suffix in per_class_metrics:
+            metric_plot = (
+                ggplot(class_plot_df, aes(x="run_display", y=metric_col, fill="behavior_class_display"))
+                + geom_col(position=position_dodge(width=0.78), width=0.7)
+                + coord_flip()
+                + scale_fill_manual(values=PREDICTION_COLORS)
+                + scale_y_continuous(labels=percent_format(), limits=(0.0, 1.0), breaks=[0.0, 0.2, 0.4, 0.6, 0.8, 1.0])
+                + labs(title=f"{full_scope} - {title_suffix}", x="", y=y_label, fill="Class")
+                + theme_bw()
+                + theme(figure_size=(12, 7), axis_text_y=element_text(size=9))
             )
+            if not class_pending.empty:
+                metric_plot = metric_plot + geom_text(
+                    data=class_pending,
+                    mapping=aes(x="run_display", y="y", label="label"),
+                    inherit_aes=False,
+                    color="#6c757d",
+                    size=9,
+                )
 
-        save_plot_multi(
-            class_accuracy_bar,
-            figures_dir=figures_dir,
-            base_name="per_class_accuracy_bar_by_run",
-            width=12,
-            height=7,
-        )
+            save_plot_multi(
+                metric_plot,
+                figures_dir=figures_dir,
+                base_name=base_name,
+                width=12,
+                height=7,
+            )
 
     if not direct_df.empty:
         direct_plot_df = apply_run_order(direct_df, run_order)
@@ -809,7 +1024,12 @@ def make_bar_plots(
             + coord_flip()
             + scale_fill_manual(values=SCORING_COLORS)
             + scale_y_continuous(labels=percent_format(), limits=(0.0, 1.0), breaks=[0.0, 0.2, 0.4, 0.6, 0.8, 1.0])
-            + labs(title="Unsupported 'direct' Prediction Rate", x="", y="Rate", fill="Scoring")
+            + labs(
+                title=f"{full_scope} - Unsupported 'direct' Prediction Rate",
+                x="",
+                y="Rate",
+                fill="Scoring",
+            )
             + theme_bw()
             + theme(figure_size=(11, 6), axis_text_y=element_text(size=9))
         )
@@ -840,7 +1060,12 @@ def make_bar_plots(
             + coord_flip()
             + scale_fill_manual(values=OUTCOME_COLORS)
             + scale_y_continuous(labels=percent_format(), limits=(0.0, 1.0), breaks=[0.0, 0.2, 0.4, 0.6, 0.8, 1.0])
-            + labs(title="Normalization Outcome Breakdown", x="", y="Fraction of Examples", fill="Outcome")
+            + labs(
+                title=f"{full_scope} - Normalization Outcome Breakdown",
+                x="",
+                y="Fraction of Examples",
+                fill="Outcome",
+            )
             + theme_bw()
             + theme(figure_size=(11, 6), axis_text_y=element_text(size=9))
         )
@@ -874,7 +1099,12 @@ def make_bar_plots(
                 + coord_flip()
                 + scale_fill_manual(values=PREDICTION_COLORS)
                 + scale_y_continuous(labels=percent_format(), limits=(0.0, 1.0), breaks=[0.0, 0.2, 0.4, 0.6, 0.8, 1.0])
-                + labs(title="Normalized Prediction Mix by Run", x="", y="Fraction of Predictions", fill="Predicted Label")
+                + labs(
+                    title=f"{full_scope} - Normalized Prediction Mix by Run",
+                    x="",
+                    y="Fraction of Predictions",
+                    fill="Predicted Label",
+                )
                 + theme_bw()
                 + theme(figure_size=(11, 6), axis_text_y=element_text(size=9))
             )
@@ -916,7 +1146,7 @@ def make_bar_plots(
                         breaks=[0.0, 0.2, 0.4, 0.6, 0.8, 1.0],
                     )
                     + labs(
-                        title="Normalized Prediction Mix by Run (Without Probe)",
+                        title=f"{no_probe_scope} - Normalized Prediction Mix by Run (Without Probe)",
                         x="",
                         y="Fraction of Predictions",
                         fill="Predicted Label",
@@ -947,6 +1177,8 @@ def main() -> None:
 
     runs_dir = Path(args.runs_dir).resolve()
     probe_runs_dir = Path(args.probe_runs_dir).resolve()
+    if not probe_runs_dir.exists() and (runs_dir / "Probe Evals").exists():
+        probe_runs_dir = (runs_dir / "Probe Evals").resolve()
 
     output_dir = ensure_dir(Path(args.output_dir).resolve())
     data_dir = ensure_dir(output_dir / "data")
@@ -954,7 +1186,7 @@ def main() -> None:
 
     run_dirs = discover_run_dirs(runs_dir)
     if not run_dirs:
-        raise FileNotFoundError(f"No prompting/post-training eval run directories found under {runs_dir}.")
+        raise FileNotFoundError(f"No eval run directories found under {runs_dir}.")
     probe_dirs = discover_probe_dirs(probe_runs_dir)
 
     run_records: List[Dict[str, Any]] = []
@@ -963,22 +1195,25 @@ def main() -> None:
     outcome_records: List[Dict[str, Any]] = []
     prediction_mix_records: List[Dict[str, Any]] = []
 
-    for run_dir in run_dirs:
+    for run_dir, source_group in run_dirs:
         run_key = run_dir.name
         summary = load_json(run_dir / "summary.json")
         run_config = load_json(run_dir / "run_config.json")
 
         model_family = infer_model_family(run_key, run_config)
-        variant_label = infer_variant_label(run_key, run_config)
+        run_group = infer_run_group(run_key, run_config, source_group=source_group)
+        variant_label = infer_eval_variant_label(run_key, run_config, run_group=run_group)
         _, family_short = family_display_names(model_family)
-        run_display = make_run_display(family_short, variant_label)
+        run_display = make_run_display(family_short, run_group, variant_label)
 
         run_records.append(
             {
                 "run_key": run_key,
                 "run_display": run_display,
                 "model_family": model_family,
+                "run_group": run_group,
                 "variant_label": variant_label,
+                "probe_source_variant": "n/a",
                 "is_probe": False,
                 "is_placeholder": False,
                 "probe_eval_setting": "n/a",
@@ -995,7 +1230,9 @@ def main() -> None:
                 run_key=run_key,
                 run_display=run_display,
                 model_family=model_family,
+                run_group=run_group,
                 variant_label=variant_label,
+                probe_source_variant="n/a",
                 summary=summary,
                 is_probe=False,
                 is_placeholder=False,
@@ -1010,7 +1247,9 @@ def main() -> None:
                 run_key=run_key,
                 run_display=run_display,
                 model_family=model_family,
+                run_group=run_group,
                 variant_label=variant_label,
+                probe_source_variant="n/a",
                 samples=samples,
                 label_order=label_order,
                 is_probe=False,
@@ -1025,7 +1264,9 @@ def main() -> None:
         run_config = load_json(probe_dir / "run_config.json")
 
         model_family = infer_model_family(probe_dir.name, run_config)
+        run_group = "Probe"
         probe_eval_setting = infer_probe_eval_setting(probe_dir.name, run_config)
+        probe_source_variant = infer_probe_source_variant(probe_dir.name, run_config)
         _, family_short = family_display_names(model_family)
 
         layers: Dict[str, Dict[str, Any]] = probe_eval.get("layers") or {}
@@ -1048,7 +1289,12 @@ def main() -> None:
 
             variant_label = infer_probe_variant_label(layer_tag)
             run_key = f"{probe_dir.name}:{layer_tag}"
-            run_display = make_probe_run_display(family_short, probe_eval_setting, variant_label)
+            run_display = make_probe_run_display(
+                family_short,
+                probe_eval_setting,
+                variant_label,
+                probe_source_variant=probe_source_variant,
+            )
             n_examples = int(probe_eval.get("num_joined_examples", 0) or 0)
             probe_accuracy = float(probe_vs_gold.get("accuracy", 0.0) or 0.0)
             probe_macro_f1 = float(
@@ -1064,7 +1310,9 @@ def main() -> None:
                     "run_key": run_key,
                     "run_display": run_display,
                     "model_family": model_family,
+                    "run_group": run_group,
                     "variant_label": variant_label,
+                    "probe_source_variant": probe_source_variant,
                     "is_probe": True,
                     "is_placeholder": False,
                     "probe_eval_setting": probe_eval_setting,
@@ -1082,7 +1330,9 @@ def main() -> None:
                     run_key=run_key,
                     run_display=run_display,
                     model_family=model_family,
+                    run_group=run_group,
                     variant_label=variant_label,
+                    probe_source_variant=probe_source_variant,
                     summary=summary_like,
                     is_probe=True,
                     is_placeholder=False,
@@ -1107,7 +1357,9 @@ def main() -> None:
                         run_key=run_key,
                         run_display=run_display,
                         model_family=model_family,
+                        run_group=run_group,
                         variant_label=variant_label,
+                        probe_source_variant=probe_source_variant,
                         samples=layer_samples,
                         label_order=summary_like.get("label_order") or DEFAULT_LABEL_ORDER,
                         is_probe=True,

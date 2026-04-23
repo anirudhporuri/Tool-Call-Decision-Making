@@ -1,46 +1,52 @@
 # Bar-Only Plots (`plot_results_new`)
 
-This folder contains a new plotting pipeline that mirrors the visual style of `plot_results/analyze_results.py`, but only generates bar-style plots (no heatmaps).
+This folder contains a bar-only plotting pipeline that matches the style of `plot_results` while using the `hmm/` snapshot layout.
 
-## What this script does
+## Data Sources
 
-- Uses the same general look-and-feel:
-  - `plotnine`
-  - `theme_bw`
-  - horizontal bars
-  - consistent family/class color palette
-- Aggregates prompting eval runs and probe eval runs (if present).
-- Writes CSV tables under `output/data`.
-- Writes bar plots under `output/figures`.
-- Injects **placeholder bars** for missing Gemma CAI eval runs by default.
+By default, the script reads:
 
-## Placeholder logic (Gemma CAI pending)
+- `hmm/Prompting Evals`
+- `hmm/Post-Training Evals`
+- `hmm/CAI Evals`
+- `hmm/Probe Evals`
 
-When Gemma CAI eval runs are incomplete, the script infers missing runs from expected naming patterns and inserts placeholder rows.
+It supports either a root directory with those subfolders or a direct run directory.
 
-Expected Gemma CAI eval keys include:
+## Run Naming and Ordering
 
-- `gemma_self_full_sft_model_eval`
-- `gemma_self_full_dpo_base_model_eval`
-- `gemma_self_full_dpo_from_sft_model_eval`
+Runs are displayed with explicit names and grouped order:
 
-Additionally, if llama CAI eval runs exist, the script mirrors those names into Gemma equivalents and fills missing ones.
+1. Prompting
+2. Post-Training
+3. CAI
+4. Probe
 
-Placeholders are rendered as:
+This grouping happens inside each model family (Llama, then Gemma).
 
-- gray bars in run-level plots
-- `PENDING` labels on affected runs
-- zero-valued placeholder rows in CSV outputs so ordering remains stable
+Example labels:
+
+- `Llama Prompting Zero-shot`
+- `Llama Post-Training SFT`
+- `Llama CAI DPO (From SFT)`
+- `Llama Probe Post-Training DPO (Middle layer)`
+
+## Placeholders (Gemma CAI pending)
+
+If Gemma CAI runs are missing, placeholder rows are injected by default for expected run keys, and affected bars are marked `PENDING`.
 
 Disable placeholders with `--no-placeholders`.
 
-## Generated plots
+## Generated Plots
 
 - `normalized_accuracy_by_run.pdf`
 - `normalized_macro_f1_by_run.pdf`
 - `normalized_accuracy_by_run_without_probe.pdf`
 - `normalized_macro_f1_by_run_without_probe.pdf`
 - `per_class_accuracy_bar_by_run.pdf`
+- `per_class_precision_bar_by_run.pdf`
+- `per_class_recall_bar_by_run.pdf`
+- `per_class_f1_bar_by_run.pdf`
 - `unsupported_direct_prediction_rate_by_run.pdf`
 - `normalization_outcome_breakdown_by_run.pdf`
 - `normalized_prediction_mix_by_run.pdf`
@@ -56,23 +62,24 @@ From repo root:
 python3 plot_results_new/analyze_results_bar_only.py
 ```
 
-With explicit directories (for example, `hmm` snapshots):
+Custom output directory:
 
 ```bash
 python3 plot_results_new/analyze_results_bar_only.py \
-  --runs-dir "hmm/Prompting Evals" \
-  --probe-runs-dir "hmm/Probe Evals" \
-  --output-dir "plot_results_new/output_hmm"
+  --output-dir plot_results_new/output_custom
 ```
 
-If you want only real runs and no placeholders:
+Custom data directories:
 
 ```bash
-python3 plot_results_new/analyze_results_bar_only.py --no-placeholders
+python3 plot_results_new/analyze_results_bar_only.py \
+  --runs-dir hmm \
+  --probe-runs-dir "hmm/Probe Evals" \
+  --output-dir plot_results_new/output_hmm
 ```
 
-## Output structure
+## Output Structure
 
 - `output/data/*.csv`: aggregated metrics tables
 - `output/figures/*.pdf`: bar plots
-- `output/analysis_summary.md`: quick summary + placeholder list
+- `output/analysis_summary.md`: quick summary and placeholder list

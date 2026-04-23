@@ -1,21 +1,29 @@
-run_key,run_display,model_family,variant_label,is_probe,is_placeholder,scoring,n_examples,direct_predictions,direct_prediction_rate,family_rank,variant_rank,probe_setting_rank
-llama32_3b_sft_zeroshot_eval,Llama SFT [llama32_3b_sft_zeroshot_eval],llama,SFT,False,False,raw,3652,16,0.004381161007667032,0,2,99
-llama32_3b_sft_zeroshot_eval,Llama SFT [llama32_3b_sft_zeroshot_eval],llama,SFT,False,False,normalized,3652,19,0.0052026286966046,0,2,99
-llama_self_full_sft_model_eval,Llama SFT [llama_self_full_sft_model_eval],llama,SFT,False,False,raw,3652,74,0.020262869660460023,0,2,99
-llama_self_full_sft_model_eval,Llama SFT [llama_self_full_sft_model_eval],llama,SFT,False,False,normalized,3652,288,0.07886089813800658,0,2,99
-llama32_3b_dpo_zeroshot_eval,Llama DPO [llama32_3b_dpo_zeroshot_eval],llama,DPO,False,False,raw,3652,69,0.018893756845564075,0,3,99
-llama32_3b_dpo_zeroshot_eval,Llama DPO [llama32_3b_dpo_zeroshot_eval],llama,DPO,False,False,normalized,3652,283,0.07749178532311063,0,3,99
-llama_self_full_dpo_base_model_eval,Llama DPO [llama_self_full_dpo_base_model_eval],llama,DPO,False,False,raw,3652,86,0.023548740416210297,0,3,99
-llama_self_full_dpo_base_model_eval,Llama DPO [llama_self_full_dpo_base_model_eval],llama,DPO,False,False,normalized,3652,433,0.11856516976998904,0,3,99
-llama_self_full_dpo_from_sft_model_eval,Llama DPO [llama_self_full_dpo_from_sft_model_eval],llama,DPO,False,False,raw,3652,77,0.02108433734939759,0,3,99
-llama_self_full_dpo_from_sft_model_eval,Llama DPO [llama_self_full_dpo_from_sft_model_eval],llama,DPO,False,False,normalized,3652,287,0.07858707557502738,0,3,99
-gemma3_4b_sft_zeroshot_eval,Gemma SFT [gemma3_4b_sft_zeroshot_eval],gemma,SFT,False,False,raw,3652,670,0.18346111719605696,1,2,99
-gemma3_4b_sft_zeroshot_eval,Gemma SFT [gemma3_4b_sft_zeroshot_eval],gemma,SFT,False,False,normalized,3652,1070,0.29299014238773274,1,2,99
-gemma_self_full_sft_model_eval,Gemma SFT [gemma_self_full_sft_model_eval],gemma,SFT,False,False,raw,3652,77,0.02108433734939759,1,2,99
-gemma_self_full_sft_model_eval,Gemma SFT [gemma_self_full_sft_model_eval],gemma,SFT,False,False,normalized,3652,154,0.04216867469879518,1,2,99
-gemma3_4b_dpo_zeroshot_eval,Gemma DPO [gemma3_4b_dpo_zeroshot_eval],gemma,DPO,False,False,raw,3652,686,0.18784227820372398,1,3,99
-gemma3_4b_dpo_zeroshot_eval,Gemma DPO [gemma3_4b_dpo_zeroshot_eval],gemma,DPO,False,False,normalized,3652,935,0.2560240963855422,1,3,99
-gemma_self_full_dpo_base_model_eval,Gemma DPO [gemma_self_full_dpo_base_model_eval],gemma,DPO,False,True,raw,0,0,0.0,1,3,99
-gemma_self_full_dpo_base_model_eval,Gemma DPO [gemma_self_full_dpo_base_model_eval],gemma,DPO,False,True,normalized,0,0,0.0,1,3,99
-gemma_self_full_dpo_from_sft_model_eval,Gemma DPO [gemma_self_full_dpo_from_sft_model_eval],gemma,DPO,False,True,raw,0,0,0.0,1,3,99
-gemma_self_full_dpo_from_sft_model_eval,Gemma DPO [gemma_self_full_dpo_from_sft_model_eval],gemma,DPO,False,True,normalized,0,0,0.0,1,3,99
+run_key,run_display,model_family,run_group,variant_label,probe_source_variant,is_probe,is_placeholder,scoring,n_examples,direct_predictions,direct_prediction_rate,family_rank,run_group_rank,variant_rank,probe_source_rank,probe_setting_rank
+llama32_3b_zeroshot,Llama Prompting Zero-shot,llama,Prompting,Zero-shot,n/a,False,False,raw,3652,84,0.023001095290251915,0,0,0,99,99
+llama32_3b_zeroshot,Llama Prompting Zero-shot,llama,Prompting,Zero-shot,n/a,False,False,normalized,3652,445,0.12185104052573932,0,0,0,99,99
+llama32_3b_4shot,Llama Prompting 4-shot,llama,Prompting,4-shot,n/a,False,False,raw,3652,85,0.023274917853231106,0,0,1,99,99
+llama32_3b_4shot,Llama Prompting 4-shot,llama,Prompting,4-shot,n/a,False,False,normalized,3652,282,0.07721796276013143,0,0,1,99,99
+llama32_3b_sft_zeroshot_eval,Llama Post-Training SFT,llama,Post-Training,SFT,n/a,False,False,raw,3652,16,0.004381161007667032,0,1,0,99,99
+llama32_3b_sft_zeroshot_eval,Llama Post-Training SFT,llama,Post-Training,SFT,n/a,False,False,normalized,3652,19,0.0052026286966046,0,1,0,99,99
+llama32_3b_dpo_zeroshot_eval,Llama Post-Training DPO,llama,Post-Training,DPO,n/a,False,False,raw,3652,69,0.018893756845564075,0,1,1,99,99
+llama32_3b_dpo_zeroshot_eval,Llama Post-Training DPO,llama,Post-Training,DPO,n/a,False,False,normalized,3652,283,0.07749178532311063,0,1,1,99,99
+llama_self_full_sft_model_eval,Llama CAI SFT,llama,CAI,SFT,n/a,False,False,raw,3652,74,0.020262869660460023,0,2,0,99,99
+llama_self_full_sft_model_eval,Llama CAI SFT,llama,CAI,SFT,n/a,False,False,normalized,3652,288,0.07886089813800658,0,2,0,99,99
+llama_self_full_dpo_base_model_eval,Llama CAI DPO (Base),llama,CAI,DPO (Base),n/a,False,False,raw,3652,86,0.023548740416210297,0,2,1,99,99
+llama_self_full_dpo_base_model_eval,Llama CAI DPO (Base),llama,CAI,DPO (Base),n/a,False,False,normalized,3652,433,0.11856516976998904,0,2,1,99,99
+llama_self_full_dpo_from_sft_model_eval,Llama CAI DPO (From SFT),llama,CAI,DPO (From SFT),n/a,False,False,raw,3652,77,0.02108433734939759,0,2,2,99,99
+llama_self_full_dpo_from_sft_model_eval,Llama CAI DPO (From SFT),llama,CAI,DPO (From SFT),n/a,False,False,normalized,3652,287,0.07858707557502738,0,2,2,99,99
+gemma3_4b_zeroshot,Gemma Prompting Zero-shot,gemma,Prompting,Zero-shot,n/a,False,False,raw,3652,726,0.19879518072289157,1,0,0,99,99
+gemma3_4b_zeroshot,Gemma Prompting Zero-shot,gemma,Prompting,Zero-shot,n/a,False,False,normalized,3652,974,0.2667031763417306,1,0,0,99,99
+gemma3_4b_4shot,Gemma Prompting 4-shot,gemma,Prompting,4-shot,n/a,False,False,raw,3652,802,0.21960569550930997,1,0,1,99,99
+gemma3_4b_4shot,Gemma Prompting 4-shot,gemma,Prompting,4-shot,n/a,False,False,normalized,3652,1002,0.27437020810514784,1,0,1,99,99
+gemma3_4b_sft_zeroshot_eval,Gemma Post-Training SFT,gemma,Post-Training,SFT,n/a,False,False,raw,3652,670,0.18346111719605696,1,1,0,99,99
+gemma3_4b_sft_zeroshot_eval,Gemma Post-Training SFT,gemma,Post-Training,SFT,n/a,False,False,normalized,3652,1070,0.29299014238773274,1,1,0,99,99
+gemma3_4b_dpo_zeroshot_eval,Gemma Post-Training DPO,gemma,Post-Training,DPO,n/a,False,False,raw,3652,686,0.18784227820372398,1,1,1,99,99
+gemma3_4b_dpo_zeroshot_eval,Gemma Post-Training DPO,gemma,Post-Training,DPO,n/a,False,False,normalized,3652,935,0.2560240963855422,1,1,1,99,99
+gemma_self_full_sft_model_eval,Gemma CAI SFT,gemma,CAI,SFT,n/a,False,False,raw,3652,77,0.02108433734939759,1,2,0,99,99
+gemma_self_full_sft_model_eval,Gemma CAI SFT,gemma,CAI,SFT,n/a,False,False,normalized,3652,154,0.04216867469879518,1,2,0,99,99
+gemma_self_full_dpo_base_model_eval,Gemma CAI DPO (Base),gemma,CAI,DPO (Base),n/a,False,True,raw,0,0,0.0,1,2,1,99,99
+gemma_self_full_dpo_base_model_eval,Gemma CAI DPO (Base),gemma,CAI,DPO (Base),n/a,False,True,normalized,0,0,0.0,1,2,1,99,99
+gemma_self_full_dpo_from_sft_model_eval,Gemma CAI DPO (From SFT),gemma,CAI,DPO (From SFT),n/a,False,True,raw,0,0,0.0,1,2,2,99,99
+gemma_self_full_dpo_from_sft_model_eval,Gemma CAI DPO (From SFT),gemma,CAI,DPO (From SFT),n/a,False,True,normalized,0,0,0.0,1,2,2,99,99
