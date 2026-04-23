@@ -1,0 +1,21 @@
+% Requires: \usepackage{booktabs}
+\begin{table}[t]
+  \centering
+  \small
+  \begin{tabular}{lrrrll}
+    \toprule
+    Probe Setup & Middle & 75% Depth & Last & Chosen Layer & Selection Reason \\
+    \midrule
+    Gemma Probe Post-Training DPO & \textbf{0.514} & 0.504 & 0.506 & Last layer & Highest accuracy \\
+    Gemma Probe Post-Training SFT & 0.580 & \textbf{0.612} & 0.609 & 75\% depth layer & Highest accuracy \\
+    Gemma Probe Prompting 4-shot & \textbf{0.175} & \textbf{0.175} & \textbf{0.175} & Middle layer & Tie after accuracy and macro-F1 \\
+    Gemma Probe Prompting Zero-shot & \textbf{0.483} & 0.483 & 0.456 & 75\% depth layer & Highest accuracy \\
+    Llama Probe Post-Training DPO & 0.546 & 0.543 & \textbf{0.546} & Last layer & Highest accuracy \\
+    Llama Probe Post-Training SFT & 0.598 & \textbf{0.606} & 0.569 & 75\% depth layer & Highest accuracy \\
+    Llama Probe Prompting 4-shot & \textbf{0.175} & \textbf{0.175} & \textbf{0.175} & Middle layer & Tie after accuracy and macro-F1 \\
+    Llama Probe Prompting Zero-shot & \textbf{0.550} & 0.527 & 0.464 & Middle layer & Highest accuracy \\
+    \bottomrule
+  \end{tabular}
+  \caption{Probe-layer macro-F1 comparison for each probe setup.}
+  \label{tab:probe-layer-macrof1-comparison}
+\end{table}

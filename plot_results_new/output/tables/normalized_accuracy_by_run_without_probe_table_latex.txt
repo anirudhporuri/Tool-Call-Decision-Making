@@ -1,0 +1,27 @@
+% Requires: \usepackage{booktabs}
+\begin{table}[t]
+  \centering
+  \small
+  \begin{tabular}{lr}
+    \toprule
+    Run & Accuracy \\
+    \midrule
+    Llama Prompting Zero-shot & 0.471 \\
+    Llama Prompting 4-shot & 0.590 \\
+    Llama Post-Training SFT & \textbf{0.799} \\
+    Llama Post-Training DPO & 0.585 \\
+    Llama CAI SFT & 0.479 \\
+    Llama CAI DPO (Base) & 0.475 \\
+    Llama CAI DPO (From SFT) & 0.482 \\
+    Gemma Prompting Zero-shot & 0.280 \\
+    Gemma Prompting 4-shot & 0.274 \\
+    Gemma Post-Training SFT & 0.282 \\
+    Gemma Post-Training DPO & 0.287 \\
+    Gemma CAI SFT & 0.402 \\
+    Gemma CAI DPO (Base) & 0.000 \\
+    Gemma CAI DPO (From SFT) & 0.000 \\
+    \bottomrule
+  \end{tabular}
+  \caption{Accuracy by run (no probe).}
+  \label{tab:normalized-accuracy-by-run-no-probe}
+\end{table}

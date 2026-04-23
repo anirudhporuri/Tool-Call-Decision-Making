@@ -1,0 +1,27 @@
+% Requires: \usepackage{booktabs}
+\begin{table}[t]
+  \centering
+  \small
+  \begin{tabular}{lrrrr}
+    \toprule
+    Run & Direct & Tool Call & Request for Info & Cannot Answer \\
+    \midrule
+    Llama Prompting Zero-shot & 0.122 & 0.699 & 0.073 & 0.107 \\
+    Llama Prompting 4-shot & 0.077 & 0.568 & 0.164 & 0.191 \\
+    Llama Post-Training SFT & 0.005 & 0.412 & 0.199 & \textbf{0.384} \\
+    Llama Post-Training DPO & 0.077 & 0.618 & 0.096 & 0.209 \\
+    Llama CAI SFT & 0.079 & 0.753 & 0.062 & 0.106 \\
+    Llama CAI DPO (Base) & 0.119 & 0.699 & 0.075 & 0.107 \\
+    Llama CAI DPO (From SFT) & 0.079 & 0.751 & 0.062 & 0.108 \\
+    Gemma Prompting Zero-shot & 0.267 & 0.323 & 0.213 & 0.197 \\
+    Gemma Prompting 4-shot & 0.274 & 0.294 & \textbf{0.232} & 0.200 \\
+    Gemma Post-Training SFT & 0.293 & 0.360 & 0.110 & 0.237 \\
+    Gemma Post-Training DPO & 0.256 & 0.311 & 0.225 & 0.208 \\
+    Gemma CAI SFT & 0.042 & \textbf{0.882} & 0.042 & 0.034 \\
+    Gemma CAI DPO (Base) & \textbf{0.000} & 0.000 & 0.000 & 0.000 \\
+    Gemma CAI DPO (From SFT) & \textbf{0.000} & 0.000 & 0.000 & 0.000 \\
+    \bottomrule
+  \end{tabular}
+  \caption{Prediction mix by run (no probe, normalized scoring).}
+  \label{tab:prediction-mix-by-run-no-probe}
+\end{table}

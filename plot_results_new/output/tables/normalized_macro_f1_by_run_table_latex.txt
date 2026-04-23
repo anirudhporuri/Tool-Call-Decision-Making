@@ -1,0 +1,35 @@
+% Requires: \usepackage{booktabs}
+\begin{table}[t]
+  \centering
+  \small
+  \begin{tabular}{lr}
+    \toprule
+    Run & Macro-F1 \\
+    \midrule
+    Llama Prompting Zero-shot & 0.307 \\
+    Llama Prompting 4-shot & 0.432 \\
+    Llama Post-Training SFT & 0.590 \\
+    Llama Post-Training DPO & 0.418 \\
+    Llama CAI SFT & 0.307 \\
+    Llama CAI DPO (Base) & 0.311 \\
+    Llama CAI DPO (From SFT) & 0.310 \\
+    Llama Probe Prompting Zero-shot (Middle layer) & 0.550 \\
+    Llama Probe Prompting 4-shot (Middle layer) & 0.175 \\
+    Llama Probe Post-Training SFT (75\% depth layer) & 0.606 \\
+    Llama Probe Post-Training DPO (Last layer) & 0.546 \\
+    Gemma Prompting Zero-shot & 0.237 \\
+    Gemma Prompting 4-shot & 0.235 \\
+    Gemma Post-Training SFT & 0.235 \\
+    Gemma Post-Training DPO & 0.242 \\
+    Gemma CAI SFT & 0.211 \\
+    Gemma CAI DPO (Base) & 0.000 \\
+    Gemma CAI DPO (From SFT) & 0.000 \\
+    Gemma Probe Prompting Zero-shot (75\% depth layer) & 0.483 \\
+    Gemma Probe Prompting 4-shot (Middle layer) & 0.175 \\
+    Gemma Probe Post-Training SFT (75\% depth layer) & \textbf{0.612} \\
+    Gemma Probe Post-Training DPO (Last layer) & 0.506 \\
+    \bottomrule
+  \end{tabular}
+  \caption{Macro-F1 by run (all runs).}
+  \label{tab:normalized-macrof1-by-run}
+\end{table}

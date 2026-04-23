@@ -94,6 +94,11 @@ PREDICTION_COLORS = {
     "Cannot answer": "#d62728",
     "Direct": "#9467bd",
 }
+PROBE_LAYER_COLORS = {
+    "Middle layer": "#1f78b4",
+    "75% depth layer": "#2ca02c",
+    "Last layer": "#d62728",
+}
 
 RUN_COLUMNS = [
     "run_key",
@@ -167,6 +172,28 @@ PRED_MIX_COLUMNS = [
     "scoring",
     "label",
     "fraction",
+]
+PROBE_LAYER_COLUMNS = [
+    "run_key",
+    "run_display",
+    "probe_parent_key",
+    "probe_parent_display",
+    "model_family",
+    "run_group",
+    "variant_label",
+    "probe_source_variant",
+    "is_probe",
+    "is_placeholder",
+    "probe_eval_setting",
+    "raw_accuracy",
+    "norm_accuracy",
+    "raw_macro_f1",
+    "norm_macro_f1",
+    "n_examples",
+    "used_in_main_plots",
+    "accuracy_rank_within_probe",
+    "macro_f1_rank_within_probe",
+    "selection_reason",
 ]
 
 
@@ -433,6 +460,14 @@ def make_probe_run_display(
     return f"{family_short} Probe ({layer_label})"
 
 
+def make_probe_parent_display(family_short: str, probe_eval_setting: str, probe_source_variant: str) -> str:
+    if probe_source_variant and probe_source_variant != "Unknown source":
+        return f"{family_short} Probe {probe_source_variant}"
+    if probe_eval_setting and probe_eval_setting != "Unknown":
+        return f"{family_short} Probe Prompting {probe_eval_setting}"
+    return f"{family_short} Probe"
+
+
 def build_probe_summary_like(layer_metrics: Dict[str, Any], n_examples: int) -> Dict[str, Any]:
     labels = list(layer_metrics.get("confusion_matrix_labels") or [])
     confusion_matrix = layer_metrics.get("confusion_matrix") or []
@@ -681,6 +716,45 @@ def sort_runs(df: pd.DataFrame) -> pd.DataFrame:
     ).reset_index(drop=True)
 
 
+def enrich_probe_layer_selection(probe_layers_df: pd.DataFrame) -> pd.DataFrame:
+    if probe_layers_df.empty:
+        return probe_layers_df
+
+    frame = probe_layers_df.copy()
+    frame["accuracy_rank_within_probe"] = (
+        frame.groupby("probe_parent_key")["norm_accuracy"].rank(method="dense", ascending=False).astype(int)
+    )
+    frame["macro_f1_rank_within_probe"] = (
+        frame.groupby("probe_parent_key")["norm_macro_f1"].rank(method="dense", ascending=False).astype(int)
+    )
+    frame["selection_reason"] = ""
+
+    eps = 1e-12
+    for parent_key, group in frame.groupby("probe_parent_key", sort=False):
+        ranked = group.sort_values(["norm_accuracy", "norm_macro_f1"], ascending=False).reset_index(drop=True)
+        if ranked.empty:
+            continue
+        best_idx = ranked.index[0]
+        best_acc = float(ranked.loc[best_idx, "norm_accuracy"])
+        best_f1 = float(ranked.loc[best_idx, "norm_macro_f1"])
+        reason = "Highest accuracy"
+
+        if len(ranked) > 1:
+            second_acc = float(ranked.loc[1, "norm_accuracy"])
+            second_f1 = float(ranked.loc[1, "norm_macro_f1"])
+            if abs(best_acc - second_acc) <= eps:
+                if best_f1 > second_f1 + eps:
+                    reason = "Accuracy tie; higher macro-F1"
+                else:
+                    reason = "Tie after accuracy and macro-F1"
+
+        chosen_rows = frame[(frame["probe_parent_key"] == parent_key) & (frame["used_in_main_plots"])]
+        if not chosen_rows.empty:
+            frame.loc[chosen_rows.index, "selection_reason"] = reason
+
+    return frame
+
+
 def enforce_unique_run_displays(
     runs_df: pd.DataFrame,
     class_df: pd.DataFrame,
@@ -892,6 +966,556 @@ def write_summary_markdown(*, runs_df: pd.DataFrame, missing_placeholder_keys: S
     lines.append("Heatmaps are intentionally omitted in this bar-only report.")
     summary_path.write_text("\n".join(lines), encoding="utf-8")
 
+
+def latex_escape(text: str) -> str:
+    return (
+        str(text)
+        .replace("\\", "\\textbackslash{}")
+        .replace("_", "\\_")
+        .replace("&", "\\&")
+        .replace("%", "\\%")
+        .replace("#", "\\#")
+        .replace("$", "\\$")
+        .replace("{", "\\{")
+        .replace("}", "\\}")
+    )
+
+
+def fmt_dec(value: Any, digits: int = 3) -> str:
+    return f"{float(value):.{digits}f}"
+
+
+def fmt_signed(value: Any, digits: int = 3) -> str:
+    return f"{float(value):+.{digits}f}"
+
+
+def fmt_latex_number(value: float, *, signed: bool = False, digits: int = 3, bold: bool = False) -> str:
+    txt = f"{float(value):+.{digits}f}" if signed else f"{float(value):.{digits}f}"
+    return f"\\textbf{{{txt}}}" if bold else txt
+
+
+def column_extrema_mask(
+    numeric_rows: Sequence[Sequence[float]],
+    *,
+    preferences: Sequence[str],
+    eps: float = 1e-12,
+) -> List[List[bool]]:
+    if not numeric_rows:
+        return []
+    n_cols = len(numeric_rows[0])
+    mask = [[False for _ in range(n_cols)] for _ in range(len(numeric_rows))]
+    for col_idx in range(n_cols):
+        pref = preferences[col_idx] if col_idx < len(preferences) else "none"
+        if pref not in {"max", "min"}:
+            continue
+        values = [float(row[col_idx]) for row in numeric_rows]
+        target = max(values) if pref == "max" else min(values)
+        for row_idx, v in enumerate(values):
+            if abs(v - target) <= eps:
+                mask[row_idx][col_idx] = True
+    return mask
+
+
+def build_latex_rows_with_bold(
+    *,
+    labels: Sequence[str],
+    numeric_rows: Sequence[Sequence[float]],
+    preferences: Sequence[str],
+    signed_cols: Sequence[int] = (),
+    digits: int = 3,
+) -> List[List[str]]:
+    extrema = column_extrema_mask(numeric_rows, preferences=preferences)
+    signed_col_set = set(signed_cols)
+    out: List[List[str]] = []
+    for row_idx, label in enumerate(labels):
+        row_out = [latex_escape(label)]
+        for col_idx, val in enumerate(numeric_rows[row_idx]):
+            row_out.append(
+                fmt_latex_number(
+                    float(val),
+                    signed=(col_idx in signed_col_set),
+                    digits=digits,
+                    bold=extrema[row_idx][col_idx],
+                )
+            )
+        out.append(row_out)
+    return out
+
+
+def write_latex_table_text(
+    *,
+    output_path: Path,
+    headers: Sequence[str],
+    rows: Sequence[Sequence[str]],
+    align: str,
+    caption: str,
+    label: str,
+) -> None:
+    lines: List[str] = [
+        "% Requires: \\usepackage{booktabs}",
+        "\\begin{table}[t]",
+        "  \\centering",
+        "  \\small",
+        f"  \\begin{{tabular}}{{{align}}}",
+        "    \\toprule",
+        "    " + " & ".join(headers) + " \\\\",
+        "    \\midrule",
+    ]
+    for row in rows:
+        lines.append("    " + " & ".join(row) + " \\\\")
+    lines.extend(
+        [
+            "    \\bottomrule",
+            "  \\end{tabular}",
+            f"  \\caption{{{caption}}}",
+            f"  \\label{{{label}}}",
+            "\\end{table}",
+            "",
+        ]
+    )
+    output_path.write_text("\n".join(lines), encoding="utf-8")
+
+
+def run_ordered_subset(df: pd.DataFrame, run_order: Sequence[str]) -> pd.DataFrame:
+    if df.empty:
+        return df.copy()
+    out = df.copy()
+    out["run_display"] = pd.Categorical(out["run_display"], categories=list(run_order), ordered=True)
+    return out.sort_values(["run_display"]).reset_index(drop=True)
+
+
+def write_chart_tables(
+    *,
+    runs_df: pd.DataFrame,
+    class_df: pd.DataFrame,
+    direct_df: pd.DataFrame,
+    outcome_df: pd.DataFrame,
+    prediction_mix_df: pd.DataFrame,
+    probe_layers_df: pd.DataFrame,
+    tables_dir: Path,
+) -> None:
+    run_order = runs_df["run_display"].tolist()
+    no_probe_runs = runs_df[~runs_df["is_probe"].fillna(False)].copy()
+    no_probe_order = no_probe_runs["run_display"].tolist()
+
+    def _write_run_metric_table(
+        *,
+        base_name: str,
+        metric_col: str,
+        metric_header: str,
+        run_subset: pd.DataFrame,
+        caption: str,
+        label: str,
+    ) -> None:
+        ordered = run_ordered_subset(run_subset, run_subset["run_display"].tolist())
+        labels = [str(r["run_display"]) for _, r in ordered.iterrows()]
+        numeric_rows = [[float(r[metric_col])] for _, r in ordered.iterrows()]
+        rows = build_latex_rows_with_bold(
+            labels=labels,
+            numeric_rows=numeric_rows,
+            preferences=["max"],
+        )
+        write_latex_table_text(
+            output_path=tables_dir / f"{base_name}_table_latex.txt",
+            headers=["Run", metric_header],
+            rows=rows,
+            align="lr",
+            caption=caption,
+            label=label,
+        )
+
+    _write_run_metric_table(
+        base_name="normalized_accuracy_by_run",
+        metric_col="norm_accuracy",
+        metric_header="Accuracy",
+        run_subset=run_ordered_subset(runs_df, run_order),
+        caption="Accuracy by run (all runs).",
+        label="tab:normalized-accuracy-by-run",
+    )
+    _write_run_metric_table(
+        base_name="normalized_macro_f1_by_run",
+        metric_col="norm_macro_f1",
+        metric_header="Macro-F1",
+        run_subset=run_ordered_subset(runs_df, run_order),
+        caption="Macro-F1 by run (all runs).",
+        label="tab:normalized-macrof1-by-run",
+    )
+    _write_run_metric_table(
+        base_name="normalized_accuracy_by_run_without_probe",
+        metric_col="norm_accuracy",
+        metric_header="Accuracy",
+        run_subset=run_ordered_subset(no_probe_runs, no_probe_order),
+        caption="Accuracy by run (no probe).",
+        label="tab:normalized-accuracy-by-run-no-probe",
+    )
+    _write_run_metric_table(
+        base_name="normalized_macro_f1_by_run_without_probe",
+        metric_col="norm_macro_f1",
+        metric_header="Macro-F1",
+        run_subset=run_ordered_subset(no_probe_runs, no_probe_order),
+        caption="Macro-F1 by run (no probe).",
+        label="tab:normalized-macrof1-by-run-no-probe",
+    )
+
+    class_norm = class_df[
+        (class_df["scoring"] == "normalized") & (class_df["behavior_class"].isin(PRIMARY_BEHAVIOR_CLASSES))
+    ].copy()
+    class_metric_specs = [
+        ("per_class_accuracy_bar_by_run", "accuracy", "Per-class one-vs-rest accuracy (all runs)."),
+        ("per_class_precision_bar_by_run", "precision", "Per-class precision (all runs)."),
+        ("per_class_recall_bar_by_run", "recall", "Per-class recall (all runs)."),
+        ("per_class_f1_bar_by_run", "f1", "Per-class F1 (all runs)."),
+    ]
+    class_cols = ["tool_call", "request_for_info", "cannot_answer"]
+    class_headers = [CLASS_DISPLAY[c] for c in class_cols]
+
+    for base_name, metric_col, caption in class_metric_specs:
+        sub = run_ordered_subset(class_norm, run_order)
+        pivot = (
+            sub.pivot_table(index="run_display", columns="behavior_class", values=metric_col, aggfunc="first")
+            .reindex(columns=class_cols)
+            .reset_index()
+        )
+        labels = [str(row["run_display"]) for _, row in pivot.iterrows()]
+        numeric_rows = [
+            [
+                float(row.get("tool_call", 0.0)),
+                float(row.get("request_for_info", 0.0)),
+                float(row.get("cannot_answer", 0.0)),
+            ]
+            for _, row in pivot.iterrows()
+        ]
+        rows = build_latex_rows_with_bold(
+            labels=labels,
+            numeric_rows=numeric_rows,
+            preferences=["max", "max", "max"],
+        )
+        write_latex_table_text(
+            output_path=tables_dir / f"{base_name}_table_latex.txt",
+            headers=["Run"] + class_headers,
+            rows=rows,
+            align="lrrr",
+            caption=caption,
+            label=f"tab:{base_name}",
+        )
+
+        no_probe_sub = sub[~sub["is_probe"].fillna(False)].copy()
+        no_probe_sub = run_ordered_subset(no_probe_sub, no_probe_order)
+        pivot_no_probe = (
+            no_probe_sub.pivot_table(index="run_display", columns="behavior_class", values=metric_col, aggfunc="first")
+            .reindex(columns=class_cols)
+            .reset_index()
+        )
+        labels_no_probe = [str(row["run_display"]) for _, row in pivot_no_probe.iterrows()]
+        numeric_rows_no_probe = [
+            [
+                float(row.get("tool_call", 0.0)),
+                float(row.get("request_for_info", 0.0)),
+                float(row.get("cannot_answer", 0.0)),
+            ]
+            for _, row in pivot_no_probe.iterrows()
+        ]
+        rows_no_probe = build_latex_rows_with_bold(
+            labels=labels_no_probe,
+            numeric_rows=numeric_rows_no_probe,
+            preferences=["max", "max", "max"],
+        )
+        write_latex_table_text(
+            output_path=tables_dir / f"{base_name}_without_probe_table_latex.txt",
+            headers=["Run"] + class_headers,
+            rows=rows_no_probe,
+            align="lrrr",
+            caption=caption.replace("(all runs)", "(no probe)"),
+            label=f"tab:{base_name}-no-probe",
+        )
+
+    def _write_direct_table(base_name: str, subset: pd.DataFrame, caption: str, label: str) -> None:
+        pivot = (
+            subset.pivot_table(index="run_display", columns="scoring", values="direct_prediction_rate", aggfunc="first")
+            .reset_index()
+        )
+        for col in [c for c in pivot.columns if c != "run_display"]:
+            pivot[col] = pivot[col].fillna(0.0)
+        labels = [str(row["run_display"]) for _, row in pivot.iterrows()]
+        numeric_rows = []
+        for _, row in pivot.iterrows():
+            raw = float(row.get("raw", 0.0))
+            norm = float(row.get("normalized", 0.0))
+            numeric_rows.append([raw, norm, norm - raw])
+        rows = build_latex_rows_with_bold(
+            labels=labels,
+            numeric_rows=numeric_rows,
+            preferences=["min", "min", "min"],
+            signed_cols=[2],
+        )
+        write_latex_table_text(
+            output_path=tables_dir / f"{base_name}_table_latex.txt",
+            headers=["Run", "Raw Direct Rate", "Norm Direct Rate", "$\\Delta$ Direct Rate"],
+            rows=rows,
+            align="lrrr",
+            caption=caption,
+            label=label,
+        )
+
+    direct_all = run_ordered_subset(direct_df, run_order)
+    _write_direct_table(
+        base_name="unsupported_direct_prediction_rate_by_run",
+        subset=direct_all,
+        caption="Unsupported direct prediction rate by run (all runs).",
+        label="tab:unsupported-direct-rate-by-run",
+    )
+    direct_no_probe = direct_all[~direct_all["is_probe"].fillna(False)].copy()
+    direct_no_probe = run_ordered_subset(direct_no_probe, no_probe_order)
+    _write_direct_table(
+        base_name="unsupported_direct_prediction_rate_by_run_without_probe",
+        subset=direct_no_probe,
+        caption="Unsupported direct prediction rate by run (no probe).",
+        label="tab:unsupported-direct-rate-by-run-no-probe",
+    )
+
+    def _write_outcome_table(base_name: str, subset: pd.DataFrame, caption: str, label: str) -> None:
+        pivot = (
+            subset.pivot_table(index="run_display", columns="outcome", values="fraction", aggfunc="first")
+            .reindex(columns=OUTCOME_ORDER)
+            .reset_index()
+        )
+        for col in [c for c in pivot.columns if c != "run_display"]:
+            pivot[col] = pivot[col].fillna(0.0)
+        labels = [str(row["run_display"]) for _, row in pivot.iterrows()]
+        numeric_rows = [
+            [
+                float(row.get("stay_correct", 0.0)),
+                float(row.get("fixed", 0.0)),
+                float(row.get("broken", 0.0)),
+                float(row.get("stay_wrong", 0.0)),
+            ]
+            for _, row in pivot.iterrows()
+        ]
+        rows = build_latex_rows_with_bold(
+            labels=labels,
+            numeric_rows=numeric_rows,
+            preferences=["max", "max", "min", "min"],
+        )
+        write_latex_table_text(
+            output_path=tables_dir / f"{base_name}_table_latex.txt",
+            headers=["Run", "Stay Correct", "Fixed", "Broken", "Stay Wrong"],
+            rows=rows,
+            align="lrrrr",
+            caption=caption,
+            label=label,
+        )
+
+    outcome_all = run_ordered_subset(outcome_df, run_order)
+    _write_outcome_table(
+        base_name="normalization_outcome_breakdown_by_run",
+        subset=outcome_all,
+        caption="Normalization outcome fractions by run (all runs).",
+        label="tab:normalization-outcome-by-run",
+    )
+    outcome_no_probe = outcome_all[~outcome_all["is_probe"].fillna(False)].copy()
+    outcome_no_probe = run_ordered_subset(outcome_no_probe, no_probe_order)
+    _write_outcome_table(
+        base_name="normalization_outcome_breakdown_by_run_without_probe",
+        subset=outcome_no_probe,
+        caption="Normalization outcome fractions by run (no probe).",
+        label="tab:normalization-outcome-by-run-no-probe",
+    )
+
+    def _write_prediction_mix_table(base_name: str, subset: pd.DataFrame, caption: str, label: str) -> None:
+        normalized = subset[subset["scoring"] == "normalized"].copy()
+        pivot = (
+            normalized.pivot_table(index="run_display", columns="label", values="fraction", aggfunc="first")
+            .reindex(columns=DEFAULT_LABEL_ORDER)
+            .reset_index()
+        )
+        for col in [c for c in pivot.columns if c != "run_display"]:
+            pivot[col] = pivot[col].fillna(0.0)
+        labels = [str(row["run_display"]) for _, row in pivot.iterrows()]
+        numeric_rows = [
+            [
+                float(row.get("direct", 0.0)),
+                float(row.get("tool_call", 0.0)),
+                float(row.get("request_for_info", 0.0)),
+                float(row.get("cannot_answer", 0.0)),
+            ]
+            for _, row in pivot.iterrows()
+        ]
+        rows = build_latex_rows_with_bold(
+            labels=labels,
+            numeric_rows=numeric_rows,
+            preferences=["min", "max", "max", "max"],
+        )
+        write_latex_table_text(
+            output_path=tables_dir / f"{base_name}_table_latex.txt",
+            headers=["Run", "Direct", "Tool Call", "Request for Info", "Cannot Answer"],
+            rows=rows,
+            align="lrrrr",
+            caption=caption,
+            label=label,
+        )
+
+    pred_all = run_ordered_subset(prediction_mix_df, run_order)
+    _write_prediction_mix_table(
+        base_name="normalized_prediction_mix_by_run",
+        subset=pred_all,
+        caption="Prediction mix by run (all runs, normalized scoring).",
+        label="tab:prediction-mix-by-run",
+    )
+    pred_no_probe = pred_all[~pred_all["is_probe"].fillna(False)].copy()
+    pred_no_probe = run_ordered_subset(pred_no_probe, no_probe_order)
+    _write_prediction_mix_table(
+        base_name="normalized_prediction_mix_by_run_without_probe",
+        subset=pred_no_probe,
+        caption="Prediction mix by run (no probe, normalized scoring).",
+        label="tab:prediction-mix-by-run-no-probe",
+    )
+
+    if not probe_layers_df.empty:
+        ordered_probe_layers = sort_runs(probe_layers_df)
+        layer_order = ["Middle layer", "75% depth layer", "Last layer"]
+
+        def _write_probe_layer_table(base_name: str, metric_col: str, metric_header: str, caption: str, label: str) -> None:
+            pivot = (
+                ordered_probe_layers.pivot_table(
+                    index="probe_parent_display",
+                    columns="variant_label",
+                    values=metric_col,
+                    aggfunc="first",
+                )
+                .reindex(columns=layer_order)
+                .reset_index()
+            )
+            for col in [c for c in pivot.columns if c != "probe_parent_display"]:
+                pivot[col] = pivot[col].fillna(0.0)
+            best = ordered_probe_layers[ordered_probe_layers["used_in_main_plots"].fillna(False)][
+                ["probe_parent_display", "variant_label", "selection_reason"]
+            ].drop_duplicates()
+            merged = pivot.merge(best, on="probe_parent_display", how="left")
+            rows = []
+            for _, row in merged.iterrows():
+                layer_values = [
+                    float(row.get("Middle layer", 0.0)),
+                    float(row.get("75% depth layer", 0.0)),
+                    float(row.get("Last layer", 0.0)),
+                ]
+                row_best = max(layer_values)
+                layer_cells = [
+                    fmt_latex_number(layer_values[0], bold=abs(layer_values[0] - row_best) <= 1e-12),
+                    fmt_latex_number(layer_values[1], bold=abs(layer_values[1] - row_best) <= 1e-12),
+                    fmt_latex_number(layer_values[2], bold=abs(layer_values[2] - row_best) <= 1e-12),
+                ]
+                rows.append(
+                    [
+                        latex_escape(str(row["probe_parent_display"])),
+                        layer_cells[0],
+                        layer_cells[1],
+                        layer_cells[2],
+                        latex_escape(str(row.get("variant_label", ""))),
+                        latex_escape(str(row.get("selection_reason", ""))),
+                    ]
+                )
+            write_latex_table_text(
+                output_path=tables_dir / f"{base_name}_table_latex.txt",
+                headers=["Probe Setup", "Middle", "75% Depth", "Last", "Chosen Layer", "Selection Reason"],
+                rows=rows,
+                align="lrrrll",
+                caption=caption,
+                label=label,
+            )
+
+        _write_probe_layer_table(
+            base_name="probe_layer_accuracy_comparison",
+            metric_col="norm_accuracy",
+            metric_header="Accuracy",
+            caption="Probe-layer accuracy comparison for each probe setup.",
+            label="tab:probe-layer-accuracy-comparison",
+        )
+        _write_probe_layer_table(
+            base_name="probe_layer_macro_f1_comparison",
+            metric_col="norm_macro_f1",
+            metric_header="Macro-F1",
+            caption="Probe-layer macro-F1 comparison for each probe setup.",
+            label="tab:probe-layer-macrof1-comparison",
+        )
+
+    non_probe_runs = runs_df[~runs_df["is_probe"].fillna(False)].copy()
+    norm_delta = non_probe_runs.copy()
+    norm_delta["delta_accuracy"] = norm_delta["norm_accuracy"] - norm_delta["raw_accuracy"]
+    norm_delta["delta_macro_f1"] = norm_delta["norm_macro_f1"] - norm_delta["raw_macro_f1"]
+    direct_pivot = (
+        direct_df[~direct_df["is_probe"].fillna(False)]
+        .pivot_table(index="run_display", columns="scoring", values="direct_prediction_rate", aggfunc="first")
+        .reset_index()
+    )
+    for col in [c for c in direct_pivot.columns if c != "run_display"]:
+        direct_pivot[col] = direct_pivot[col].fillna(0.0)
+    norm_delta = norm_delta.merge(direct_pivot, on="run_display", how="left")
+    for col in ("raw", "normalized"):
+        if col not in norm_delta.columns:
+            norm_delta[col] = 0.0
+    norm_delta[["raw", "normalized"]] = norm_delta[["raw", "normalized"]].fillna(0.0)
+    norm_delta["delta_direct_rate"] = norm_delta["normalized"] - norm_delta["raw"]
+    norm_delta = run_ordered_subset(norm_delta, no_probe_order)
+
+    norm_labels = [str(row["run_display"]) for _, row in norm_delta.iterrows()]
+    norm_numeric_rows = [
+        [
+            float(row["raw_accuracy"]),
+            float(row["norm_accuracy"]),
+            float(row["delta_accuracy"]),
+            float(row["raw_macro_f1"]),
+            float(row["norm_macro_f1"]),
+            float(row["delta_macro_f1"]),
+            float(row["raw"]),
+            float(row["normalized"]),
+            float(row["delta_direct_rate"]),
+        ]
+        for _, row in norm_delta.iterrows()
+    ]
+    raw_norm_rows = build_latex_rows_with_bold(
+        labels=norm_labels,
+        numeric_rows=norm_numeric_rows,
+        preferences=["max", "max", "max", "max", "max", "max", "min", "min", "min"],
+        signed_cols=[2, 5, 8],
+    )
+    write_latex_table_text(
+        output_path=tables_dir / "byte_normalization_effect_table_latex.txt",
+        headers=[
+            "Run",
+            "Raw Acc",
+            "Norm Acc",
+            "$\\Delta$ Acc",
+            "Raw Macro-F1",
+            "Norm Macro-F1",
+            "$\\Delta$ Macro-F1",
+            "Raw Direct",
+            "Norm Direct",
+            "$\\Delta$ Direct",
+        ],
+        rows=raw_norm_rows,
+        align="lrrrrrrrrr",
+        caption="Byte-normalization impact by run (no probe).",
+        label="tab:byte-normalization-impact",
+    )
+    write_latex_table_text(
+        output_path=tables_dir / "raw_vs_normalized_change_table_latex.txt",
+        headers=[
+            "Run",
+            "Raw Acc",
+            "Norm Acc",
+            "$\\Delta$ Acc",
+            "Raw Macro-F1",
+            "Norm Macro-F1",
+            "$\\Delta$ Macro-F1",
+        ],
+        rows=[
+            [r[0], r[1], r[2], r[3], r[4], r[5], r[6]]
+            for r in raw_norm_rows
+        ],
+        align="lrrrrrr",
+        caption="Raw vs. normalized scoring comparison by run (no probe).",
+        label="tab:raw-vs-normalized-scoring",
+    )
 
 def make_bar_plots(
     *,
@@ -1307,6 +1931,84 @@ def make_bar_plots(
                 )
 
 
+def make_probe_only_plots(*, probe_layers_df: pd.DataFrame, figures_dir: Path) -> None:
+    if probe_layers_df.empty:
+        return
+
+    probe_plot = sort_runs(probe_layers_df)
+    parent_order = probe_plot["probe_parent_display"].drop_duplicates().tolist()
+    probe_plot["probe_parent_display"] = pd.Categorical(
+        probe_plot["probe_parent_display"],
+        categories=parent_order,
+        ordered=True,
+    )
+    probe_plot["layer_display"] = pd.Categorical(
+        probe_plot["variant_label"],
+        categories=["Middle layer", "75% depth layer", "Last layer"],
+        ordered=True,
+    )
+
+    best_only = probe_plot[probe_plot["used_in_main_plots"].fillna(False)].copy()
+    if not best_only.empty:
+        best_only["best_accuracy_y"] = (best_only["norm_accuracy"] + 0.08).clip(upper=1.10)
+        best_only["best_f1_y"] = (best_only["norm_macro_f1"] + 0.08).clip(upper=1.10)
+        best_only["best_label"] = "BEST"
+
+    probe_accuracy_plot = (
+        ggplot(probe_plot, aes(x="probe_parent_display", y="norm_accuracy", fill="layer_display"))
+        + geom_col(position=position_dodge(width=0.78), width=0.7)
+        + coord_flip()
+        + scale_fill_manual(values=PROBE_LAYER_COLORS)
+        + scale_y_continuous(labels=percent_format(), limits=(0.0, 1.12), breaks=[0.0, 0.2, 0.4, 0.6, 0.8, 1.0])
+        + labs(title="Probe Layer Accuracy on When2Call", x="", y="Accuracy", fill="Layer")
+        + theme_bw()
+        + theme(figure_size=(12, 7), axis_text_y=element_text(size=9))
+    )
+    if not best_only.empty:
+        probe_accuracy_plot = probe_accuracy_plot + geom_text(
+            data=best_only,
+            mapping=aes(x="probe_parent_display", y="best_accuracy_y", label="best_label", group="layer_display"),
+            inherit_aes=False,
+            position=position_dodge(width=0.78),
+            color="#495057",
+            size=8,
+        )
+    save_plot_multi(
+        probe_accuracy_plot,
+        figures_dir=figures_dir,
+        base_name="probe_layer_accuracy_comparison",
+        width=12,
+        height=7,
+    )
+
+    probe_f1_plot = (
+        ggplot(probe_plot, aes(x="probe_parent_display", y="norm_macro_f1", fill="layer_display"))
+        + geom_col(position=position_dodge(width=0.78), width=0.7)
+        + coord_flip()
+        + scale_fill_manual(values=PROBE_LAYER_COLORS)
+        + scale_y_continuous(labels=percent_format(), limits=(0.0, 1.12), breaks=[0.0, 0.2, 0.4, 0.6, 0.8, 1.0])
+        + labs(title="Probe Layer Macro-F1 on When2Call", x="", y="Macro-F1", fill="Layer")
+        + theme_bw()
+        + theme(figure_size=(12, 7), axis_text_y=element_text(size=9))
+    )
+    if not best_only.empty:
+        probe_f1_plot = probe_f1_plot + geom_text(
+            data=best_only,
+            mapping=aes(x="probe_parent_display", y="best_f1_y", label="best_label", group="layer_display"),
+            inherit_aes=False,
+            position=position_dodge(width=0.78),
+            color="#495057",
+            size=8,
+        )
+    save_plot_multi(
+        probe_f1_plot,
+        figures_dir=figures_dir,
+        base_name="probe_layer_macro_f1_comparison",
+        width=12,
+        height=7,
+    )
+
+
 def main() -> None:
     args = parse_args()
 
@@ -1318,6 +2020,7 @@ def main() -> None:
     output_dir = ensure_dir(Path(args.output_dir).resolve())
     data_dir = ensure_dir(output_dir / "data")
     figures_dir = ensure_dir(output_dir / "figures")
+    tables_dir = ensure_dir(output_dir / "tables")
 
     run_dirs = discover_run_dirs(runs_dir)
     if not run_dirs:
@@ -1329,6 +2032,7 @@ def main() -> None:
     direct_records: List[Dict[str, Any]] = []
     outcome_records: List[Dict[str, Any]] = []
     prediction_mix_records: List[Dict[str, Any]] = []
+    probe_layer_records: List[Dict[str, Any]] = []
 
     for run_dir, source_group in run_dirs:
         run_key = run_dir.name
@@ -1403,6 +2107,7 @@ def main() -> None:
         probe_eval_setting = infer_probe_eval_setting(probe_dir.name, run_config)
         probe_source_variant = infer_probe_source_variant(probe_dir.name, run_config)
         _, family_short = family_display_names(model_family)
+        probe_parent_display = make_probe_parent_display(family_short, probe_eval_setting, probe_source_variant)
 
         layers: Dict[str, Dict[str, Any]] = probe_eval.get("layers") or {}
         layer_order = [
@@ -1420,6 +2125,51 @@ def main() -> None:
         if best_layer_tag is None:
             continue
 
+        candidate_layer_tags = [tag for tag in layer_order if tag in layers]
+        if not candidate_layer_tags:
+            candidate_layer_tags = sorted(layers.keys())
+
+        n_examples = int(probe_eval.get("num_joined_examples", 0) or 0)
+
+        for layer_tag in candidate_layer_tags:
+            layer_payload = layers.get(layer_tag) or {}
+            probe_vs_gold = layer_payload.get("probe_vs_gold") or {}
+            if not probe_vs_gold:
+                continue
+            layer_variant = infer_probe_variant_label(layer_tag)
+            layer_run_key = f"{probe_dir.name}:{layer_tag}"
+            layer_run_display = make_probe_run_display(
+                family_short,
+                probe_eval_setting,
+                layer_variant,
+                probe_source_variant=probe_source_variant,
+            )
+            layer_accuracy, layer_macro_f1 = probe_layer_score(layer_payload)
+            probe_layer_records.append(
+                {
+                    "run_key": layer_run_key,
+                    "run_display": layer_run_display,
+                    "probe_parent_key": probe_dir.name,
+                    "probe_parent_display": probe_parent_display,
+                    "model_family": model_family,
+                    "run_group": run_group,
+                    "variant_label": layer_variant,
+                    "probe_source_variant": probe_source_variant,
+                    "is_probe": True,
+                    "is_placeholder": False,
+                    "probe_eval_setting": probe_eval_setting,
+                    "raw_accuracy": layer_accuracy,
+                    "norm_accuracy": layer_accuracy,
+                    "raw_macro_f1": layer_macro_f1,
+                    "norm_macro_f1": layer_macro_f1,
+                    "n_examples": n_examples,
+                    "used_in_main_plots": bool(layer_tag == best_layer_tag),
+                    "accuracy_rank_within_probe": 0,
+                    "macro_f1_rank_within_probe": 0,
+                    "selection_reason": "",
+                }
+            )
+
         layer_payload = layers.get(best_layer_tag) or {}
         probe_vs_gold = layer_payload.get("probe_vs_gold") or {}
         if not probe_vs_gold:
@@ -1433,7 +2183,6 @@ def main() -> None:
             variant_label,
             probe_source_variant=probe_source_variant,
         )
-        n_examples = int(probe_eval.get("num_joined_examples", 0) or 0)
         probe_accuracy, probe_macro_f1 = probe_layer_score(layer_payload)
 
         run_records.append(
@@ -1505,6 +2254,9 @@ def main() -> None:
     direct_df = pd.DataFrame(direct_records, columns=DIRECT_COLUMNS)
     outcome_df = pd.DataFrame(outcome_records, columns=OUTCOME_COLUMNS)
     prediction_mix_df = pd.DataFrame(prediction_mix_records, columns=PRED_MIX_COLUMNS)
+    probe_layers_df = pd.DataFrame(probe_layer_records, columns=PROBE_LAYER_COLUMNS)
+    if not probe_layers_df.empty:
+        probe_layers_df = enrich_probe_layer_selection(probe_layers_df)
 
     missing_placeholder_keys: List[str] = []
     if not args.no_placeholders:
@@ -1543,12 +2295,30 @@ def main() -> None:
         outcome_df = sort_runs(outcome_df)
     if not prediction_mix_df.empty:
         prediction_mix_df = sort_runs(prediction_mix_df)
+    if not probe_layers_df.empty:
+        probe_layers_df = sort_runs(probe_layers_df)
 
     runs_df.to_csv(data_dir / "run_level_metrics.csv", index=False)
     class_df.to_csv(data_dir / "class_level_metrics.csv", index=False)
     direct_df.to_csv(data_dir / "direct_prediction_rate.csv", index=False)
     outcome_df.to_csv(data_dir / "normalization_outcomes.csv", index=False)
     prediction_mix_df.to_csv(data_dir / "prediction_mix.csv", index=False)
+    probe_layers_df.to_csv(data_dir / "probe_layer_metrics.csv", index=False)
+    if not probe_layers_df.empty:
+        probe_best_df = probe_layers_df[probe_layers_df["used_in_main_plots"].fillna(False)].copy()
+        probe_best_df = probe_best_df[
+            [
+                "probe_parent_key",
+                "probe_parent_display",
+                "run_key",
+                "run_display",
+                "variant_label",
+                "norm_accuracy",
+                "norm_macro_f1",
+                "selection_reason",
+            ]
+        ]
+        probe_best_df.to_csv(data_dir / "probe_best_layer_selection.csv", index=False)
 
     make_bar_plots(
         runs_df=runs_df,
@@ -1557,6 +2327,19 @@ def main() -> None:
         outcome_df=outcome_df,
         prediction_mix_df=prediction_mix_df,
         figures_dir=figures_dir,
+    )
+    make_probe_only_plots(
+        probe_layers_df=probe_layers_df,
+        figures_dir=figures_dir,
+    )
+    write_chart_tables(
+        runs_df=runs_df,
+        class_df=class_df,
+        direct_df=direct_df,
+        outcome_df=outcome_df,
+        prediction_mix_df=prediction_mix_df,
+        probe_layers_df=probe_layers_df,
+        tables_dir=tables_dir,
     )
 
     write_summary_markdown(
@@ -1569,6 +2352,7 @@ def main() -> None:
         json.dumps(
             {
                 "runs_analyzed": int(len(runs_df)),
+                "probe_layer_rows": int(len(probe_layers_df)),
                 "placeholder_runs": int(len(missing_placeholder_keys)),
                 "output_dir": str(output_dir),
             },

@@ -1,0 +1,27 @@
+% Requires: \usepackage{booktabs}
+\begin{table}[t]
+  \centering
+  \small
+  \begin{tabular}{lrrr}
+    \toprule
+    Run & Tool call & Request for info & Cannot answer \\
+    \midrule
+    Llama Prompting Zero-shot & 0.979 & 0.102 & 0.265 \\
+    Llama Prompting 4-shot & 0.939 & 0.300 & 0.479 \\
+    Llama Post-Training SFT & 0.876 & \textbf{0.569} & \textbf{0.910} \\
+    Llama Post-Training DPO & 0.949 & 0.206 & 0.532 \\
+    Llama CAI SFT & \textbf{0.994} & 0.103 & 0.274 \\
+    Llama CAI DPO (Base) & 0.982 & 0.105 & 0.269 \\
+    Llama CAI DPO (From SFT) & \textbf{0.994} & 0.105 & 0.279 \\
+    Gemma Prompting Zero-shot & 0.372 & 0.228 & 0.231 \\
+    Gemma Prompting 4-shot & 0.333 & 0.255 & 0.229 \\
+    Gemma Post-Training SFT & 0.399 & 0.144 & 0.279 \\
+    Gemma Post-Training DPO & 0.370 & 0.231 & 0.249 \\
+    Gemma CAI SFT & 0.992 & 0.060 & 0.092 \\
+    Gemma CAI DPO (Base) & 0.000 & 0.000 & 0.000 \\
+    Gemma CAI DPO (From SFT) & 0.000 & 0.000 & 0.000 \\
+    \bottomrule
+  \end{tabular}
+  \caption{Per-class recall (no probe).}
+  \label{tab:per_class_recall_bar_by_run-no-probe}
+\end{table}

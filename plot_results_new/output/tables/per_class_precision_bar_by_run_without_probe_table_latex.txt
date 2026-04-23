@@ -1,0 +1,27 @@
+% Requires: \usepackage{booktabs}
+\begin{table}[t]
+  \centering
+  \small
+  \begin{tabular}{lrrr}
+    \toprule
+    Run & Tool call & Request for info & Cannot answer \\
+    \midrule
+    Llama Prompting Zero-shot & 0.497 & 0.406 & 0.879 \\
+    Llama Prompting 4-shot & 0.586 & 0.533 & 0.891 \\
+    Llama Post-Training SFT & \textbf{0.754} & \textbf{0.831} & 0.840 \\
+    Llama Post-Training DPO & 0.545 & 0.626 & 0.903 \\
+    Llama CAI SFT & 0.468 & 0.484 & 0.915 \\
+    Llama CAI DPO (Base) & 0.498 & 0.409 & 0.893 \\
+    Llama CAI DPO (From SFT) & 0.469 & 0.496 & 0.914 \\
+    Gemma Prompting Zero-shot & 0.408 & 0.311 & 0.415 \\
+    Gemma Prompting 4-shot & 0.402 & 0.320 & 0.407 \\
+    Gemma Post-Training SFT & 0.393 & 0.381 & 0.418 \\
+    Gemma Post-Training DPO & 0.421 & 0.298 & 0.426 \\
+    Gemma CAI SFT & 0.399 & 0.418 & \textbf{0.960} \\
+    Gemma CAI DPO (Base) & 0.000 & 0.000 & 0.000 \\
+    Gemma CAI DPO (From SFT) & 0.000 & 0.000 & 0.000 \\
+    \bottomrule
+  \end{tabular}
+  \caption{Per-class precision (no probe).}
+  \label{tab:per_class_precision_bar_by_run-no-probe}
+\end{table}

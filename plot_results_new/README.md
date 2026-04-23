@@ -34,6 +34,9 @@ Example labels:
 For probe runs, only the **single best-performing layer** is kept per run
 (selected by highest probe accuracy, with macro-F1 as tiebreaker).
 
+To justify that choice, the pipeline also exports probe-only layer comparisons
+for **all** probed layers and marks the chosen layer as `BEST`.
+
 ## Placeholders (Gemma CAI pending)
 
 If Gemma CAI runs are missing, placeholder rows are injected by default for expected run keys, and affected bars are marked `PENDING`.
@@ -60,6 +63,8 @@ Disable placeholders with `--no-placeholders`.
 - `normalization_outcome_breakdown_by_run_without_probe.pdf`
 - `normalized_prediction_mix_by_run.pdf`
 - `normalized_prediction_mix_by_run_without_probe.pdf`
+- `probe_layer_accuracy_comparison.pdf`
+- `probe_layer_macro_f1_comparison.pdf`
 
 No heatmaps are generated.
 
@@ -90,5 +95,10 @@ python3 plot_results_new/analyze_results_bar_only.py \
 ## Output Structure
 
 - `output/data/*.csv`: aggregated metrics tables
+- `output/data/probe_layer_metrics.csv`: all probe layers with ranks and `selection_reason`
+- `output/data/probe_best_layer_selection.csv`: one selected `BEST` layer per probe setup
 - `output/figures/*.pdf`: bar plots
+- `output/tables/*.txt`: LaTeX tables (one per figure, with matching base name)
+- `output/tables/raw_vs_normalized_change_table_latex.txt`: legacy-style `+/-` normalization table
+- `output/tables/byte_normalization_effect_table_latex.txt`: extended `+/-` normalization impact table
 - `output/analysis_summary.md`: quick summary and placeholder list
