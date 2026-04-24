@@ -21,6 +21,8 @@ set -euo pipefail
 source ~/.bashrc
 REPO_ROOT="/fs/classhomes/mukunds/Tool-Call-Decision-Making"
 VENV_DIR="${REPO_ROOT}/.venv"
+GEMMA_MODEL_PATH="/fs/class-projects/spring2026/cmsc848q/mukunds/google__gemma-3-4b-it"
+GEMMA_MODEL_ID="google/gemma-3-4b-it"
 
 echo "Activating virtualenv at ${VENV_DIR}"
 # shellcheck disable=SC1091
@@ -37,8 +39,13 @@ for arg in "$@"; do
   fi
 done
 
+MODEL_PATH_OR_ID="${GEMMA_MODEL_ID}"
+if [[ -d "${GEMMA_MODEL_PATH}" ]]; then
+  MODEL_PATH_OR_ID="${GEMMA_MODEL_PATH}"
+fi
+
 python3 -u "${REPO_ROOT}/Probe Baselines/run_probe.py" \
-  "google/gemma-3-4b-it" \
+  "${MODEL_PATH_OR_ID}" \
   "gemma" \
   "${OUTPUT_DIR}" \
   "${EVAL_SAMPLES}" \
