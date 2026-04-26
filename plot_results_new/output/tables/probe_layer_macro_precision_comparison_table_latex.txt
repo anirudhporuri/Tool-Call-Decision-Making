@@ -8,11 +8,11 @@
     \midrule
     Gemma Probe Post-Training DPO & \textbf{0.530} & 0.508 & 0.509 & Last layer & Highest accuracy \\
     Gemma Probe Post-Training SFT & 0.593 & \textbf{0.621} & 0.616 & 75\% depth layer & Highest accuracy \\
-    Gemma Probe Prompting 4-shot & 0.000 & 0.000 & 0.000 & PENDING & Pending (corrupted 4-shot probe) \\
+    Gemma Probe Prompting 4-shot & \textbf{0.584} & 0.543 & 0.542 & Middle layer & Highest accuracy \\
     Gemma Probe Prompting Zero-shot & \textbf{0.489} & 0.485 & 0.476 & 75\% depth layer & Highest accuracy \\
     Llama Probe Post-Training DPO & \textbf{0.570} & 0.564 & 0.557 & Last layer & Highest accuracy \\
     Llama Probe Post-Training SFT & 0.614 & \textbf{0.642} & 0.571 & 75\% depth layer & Highest accuracy \\
-    Llama Probe Prompting 4-shot & 0.000 & 0.000 & 0.000 & PENDING & Pending (corrupted 4-shot probe) \\
+    Llama Probe Prompting 4-shot & \textbf{0.649} & 0.633 & 0.593 & Middle layer & Highest accuracy \\
     Llama Probe Prompting Zero-shot & \textbf{0.571} & 0.560 & 0.473 & Middle layer & Highest accuracy \\
     \bottomrule
   \end{tabular}

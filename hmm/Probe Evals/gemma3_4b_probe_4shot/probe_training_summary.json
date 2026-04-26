@@ -42,34 +42,34 @@
       "dev_results": [
         {
           "C": 0.01,
-          "dev_accuracy": 0.3333333333333333,
-          "dev_macro_f1": 0.16666666666666666
+          "dev_accuracy": 0.6677777777777778,
+          "dev_macro_f1": 0.667694623022742
         },
         {
           "C": 0.1,
-          "dev_accuracy": 0.3333333333333333,
-          "dev_macro_f1": 0.16666666666666666
+          "dev_accuracy": 0.6566666666666666,
+          "dev_macro_f1": 0.6566650979927378
         },
         {
           "C": 1.0,
-          "dev_accuracy": 0.3333333333333333,
-          "dev_macro_f1": 0.16666666666666666
+          "dev_accuracy": 0.6466666666666666,
+          "dev_macro_f1": 0.6470026761646892
         },
         {
           "C": 10.0,
-          "dev_accuracy": 0.3333333333333333,
-          "dev_macro_f1": 0.16666666666666666
+          "dev_accuracy": 0.6344444444444445,
+          "dev_macro_f1": 0.6344423244060112
         },
         {
           "C": 100.0,
-          "dev_accuracy": 0.3333333333333333,
-          "dev_macro_f1": 0.16666666666666666
+          "dev_accuracy": 0.6194444444444445,
+          "dev_macro_f1": 0.6201663972976551
         }
       ],
       "best_hparams": {
         "C": 0.01,
-        "dev_accuracy": 0.3333333333333333,
-        "dev_macro_f1": 0.16666666666666666
+        "dev_accuracy": 0.6677777777777778,
+        "dev_macro_f1": 0.667694623022742
       },
       "transformer_layer": 17,
       "hidden_state_index": 17
@@ -94,34 +94,34 @@
       "dev_results": [
         {
           "C": 0.01,
-          "dev_accuracy": 0.3333333333333333,
-          "dev_macro_f1": 0.16666666666666666
+          "dev_accuracy": 0.6611111111111111,
+          "dev_macro_f1": 0.6613840772684756
         },
         {
           "C": 0.1,
-          "dev_accuracy": 0.3333333333333333,
-          "dev_macro_f1": 0.16666666666666666
+          "dev_accuracy": 0.6677777777777778,
+          "dev_macro_f1": 0.6676867448961907
         },
         {
           "C": 1.0,
-          "dev_accuracy": 0.3333333333333333,
-          "dev_macro_f1": 0.16666666666666666
+          "dev_accuracy": 0.6527777777777778,
+          "dev_macro_f1": 0.6532889658156952
         },
         {
           "C": 10.0,
-          "dev_accuracy": 0.3333333333333333,
-          "dev_macro_f1": 0.16666666666666666
+          "dev_accuracy": 0.6377777777777778,
+          "dev_macro_f1": 0.6388746438746439
         },
         {
           "C": 100.0,
-          "dev_accuracy": 0.3333333333333333,
-          "dev_macro_f1": 0.16666666666666666
+          "dev_accuracy": 0.6266666666666667,
+          "dev_macro_f1": 0.6274903616483695
         }
       ],
       "best_hparams": {
-        "C": 0.01,
-        "dev_accuracy": 0.3333333333333333,
-        "dev_macro_f1": 0.16666666666666666
+        "C": 0.1,
+        "dev_accuracy": 0.6677777777777778,
+        "dev_macro_f1": 0.6676867448961907
       },
       "transformer_layer": 26,
       "hidden_state_index": 26
@@ -146,34 +146,34 @@
       "dev_results": [
         {
           "C": 0.01,
-          "dev_accuracy": 0.3333333333333333,
-          "dev_macro_f1": 0.16666666666666666
+          "dev_accuracy": 0.63,
+          "dev_macro_f1": 0.6300600408923992
         },
         {
           "C": 0.1,
-          "dev_accuracy": 0.3333333333333333,
-          "dev_macro_f1": 0.16666666666666666
+          "dev_accuracy": 0.6133333333333333,
+          "dev_macro_f1": 0.6139471193379494
         },
         {
           "C": 1.0,
-          "dev_accuracy": 0.3333333333333333,
-          "dev_macro_f1": 0.16666666666666666
+          "dev_accuracy": 0.6183333333333333,
+          "dev_macro_f1": 0.6195062216581309
         },
         {
           "C": 10.0,
-          "dev_accuracy": 0.3333333333333333,
-          "dev_macro_f1": 0.16666666666666666
+          "dev_accuracy": 0.6027777777777777,
+          "dev_macro_f1": 0.6035269765181885
         },
         {
           "C": 100.0,
-          "dev_accuracy": 0.3333333333333333,
-          "dev_macro_f1": 0.16666666666666666
+          "dev_accuracy": 0.5944444444444444,
+          "dev_macro_f1": 0.5951423954748508
         }
       ],
       "best_hparams": {
         "C": 0.01,
-        "dev_accuracy": 0.3333333333333333,
-        "dev_macro_f1": 0.16666666666666666
+        "dev_accuracy": 0.63,
+        "dev_macro_f1": 0.6300600408923992
       },
       "transformer_layer": 34,
       "hidden_state_index": 34

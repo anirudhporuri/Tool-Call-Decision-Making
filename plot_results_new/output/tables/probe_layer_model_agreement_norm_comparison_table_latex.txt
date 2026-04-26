@@ -1,0 +1,21 @@
+% Requires: \usepackage{booktabs}
+\begin{table}[t]
+  \centering
+  \small
+  \begin{tabular}{lrrrll}
+    \toprule
+    Probe Setup & Middle & 75% Depth & Last & Chosen Layer & Selection Reason \\
+    \midrule
+    Gemma Probe Post-Training DPO & 0.299 & 0.295 & \textbf{0.307} & Last layer & Highest accuracy \\
+    Gemma Probe Post-Training SFT & 0.273 & \textbf{0.285} & 0.283 & 75\% depth layer & Highest accuracy \\
+    Gemma Probe Prompting 4-shot & 0.273 & 0.275 & \textbf{0.281} & Middle layer & Highest accuracy \\
+    Gemma Probe Prompting Zero-shot & 0.266 & 0.272 & \textbf{0.297} & 75\% depth layer & Highest accuracy \\
+    Llama Probe Post-Training DPO & 0.425 & 0.499 & \textbf{0.542} & Last layer & Highest accuracy \\
+    Llama Probe Post-Training SFT & 0.556 & \textbf{0.616} & 0.559 & 75\% depth layer & Highest accuracy \\
+    Llama Probe Prompting 4-shot & \textbf{0.529} & 0.466 & 0.486 & Middle layer & Highest accuracy \\
+    Llama Probe Prompting Zero-shot & 0.353 & \textbf{0.381} & 0.367 & Middle layer & Highest accuracy \\
+    \bottomrule
+  \end{tabular}
+  \caption{Probe-layer agreement with model normalized predictions for each probe setup.}
+  \label{tab:probe-layer-model-agreement-norm-comparison}
+\end{table}

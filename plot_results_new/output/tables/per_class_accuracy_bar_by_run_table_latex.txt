@@ -14,7 +14,7 @@
     Llama CAI DPO (Base) & 0.643 & 0.696 & 0.729 \\
     Llama CAI DPO (From SFT) & 0.599 & 0.709 & 0.735 \\
     Llama Probe Prompting Zero-shot (Middle layer) & 0.688 & 0.630 & 0.777 \\
-    Llama Probe Prompting 4-shot (Middle layer) & 0.000 & 0.000 & 0.000 \\
+    Llama Probe Prompting 4-shot (Middle layer) & 0.699 & 0.718 & 0.825 \\
     Llama Probe Post-Training SFT (75\% depth layer) & 0.688 & 0.729 & 0.811 \\
     Llama Probe Post-Training DPO (Last layer) & 0.642 & 0.684 & 0.780 \\
     Gemma Prompting Zero-shot & 0.586 & 0.629 & 0.612 \\
@@ -22,10 +22,10 @@
     Gemma Post-Training SFT & 0.568 & 0.683 & 0.607 \\
     Gemma Post-Training DPO & 0.596 & 0.619 & 0.614 \\
     Gemma CAI SFT & 0.467 & 0.702 & 0.677 \\
-    Gemma CAI DPO (Base) & 0.000 & 0.000 & 0.000 \\
+    Gemma CAI DPO (Base) & 0.634 & 0.692 & 0.768 \\
     Gemma CAI DPO (From SFT) & 0.000 & 0.000 & 0.000 \\
     Gemma Probe Prompting Zero-shot (75\% depth layer) & 0.625 & 0.637 & 0.712 \\
-    Gemma Probe Prompting 4-shot (Middle layer) & 0.000 & 0.000 & 0.000 \\
+    Gemma Probe Prompting 4-shot (Middle layer) & 0.700 & 0.650 & 0.763 \\
     Gemma Probe Post-Training SFT (75\% depth layer) & 0.729 & 0.702 & 0.793 \\
     Gemma Probe Post-Training DPO (Last layer) & 0.628 & 0.664 & 0.733 \\
     \bottomrule

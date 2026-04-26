@@ -18,7 +18,7 @@
     Gemma Post-Training SFT & 0.235 \\
     Gemma Post-Training DPO & 0.242 \\
     Gemma CAI SFT & 0.211 \\
-    Gemma CAI DPO (Base) & 0.000 \\
+    Gemma CAI DPO (Base) & 0.352 \\
     Gemma CAI DPO (From SFT) & 0.000 \\
     \bottomrule
   \end{tabular}

@@ -1,8 +1,9 @@
 {
-  "model_name_or_path": "google/gemma-3-4b-it",
+  "model_name_or_path": "/fs/class-projects/spring2026/cmsc848q/mukunds/google__gemma-3-4b-it",
   "model_family": "gemma",
   "output_dir": "/fs/classhomes/mukunds/Tool-Call-Decision-Making/Probe Baselines/outputs/gemma3_4b_probe_4shot",
   "eval_samples_jsonl": "/fs/classhomes/mukunds/Tool-Call-Decision-Making/Prompting Baselines/gemma3_4b_4shot/samples.jsonl",
+  "peft_base_model_override": null,
   "train_source_jsonls": [
     "/fs/classhomes/mukunds/Tool-Call-Decision-Making/CAI/generated_datasets/train_pref_cai_sft_source.jsonl",
     "/fs/classhomes/mukunds/Tool-Call-Decision-Making/CAI/generated_datasets/train_pref_cai_dpo_source.jsonl"
@@ -21,7 +22,7 @@
   "attn_implementation": null,
   "device_map": "auto",
   "batch_size": 2,
-  "max_length": 1024,
+  "max_length": 2048,
   "max_train_examples": null,
   "max_test_examples": null,
   "start_index": 0,

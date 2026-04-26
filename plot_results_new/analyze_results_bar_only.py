@@ -20,12 +20,14 @@ from plotnine import (  # noqa: E402
     aes,
     coord_flip,
     element_text,
+    facet_wrap,
     geom_col,
     geom_text,
     ggplot,
     labs,
     position_dodge,
     scale_fill_manual,
+    scale_x_discrete,
     scale_y_continuous,
     theme,
     theme_bw,
@@ -94,8 +96,8 @@ PREDICTION_COLORS = {
     "Cannot answer": "#d62728",
     "Direct": "#9467bd",
 }
-CORRUPTED_PROBE_SOURCE_VARIANTS = {"Prompting 4-shot"}
-PROBE_PENDING_REASON = "Pending (corrupted 4-shot probe)"
+CORRUPTED_PROBE_SOURCE_VARIANTS: set[str] = set()
+PROBE_PENDING_REASON = "Pending probe run"
 PROBE_LAYER_COLORS = {
     "Middle layer": "#1f78b4",
     "75% depth layer": "#2ca02c",
@@ -195,6 +197,10 @@ PROBE_LAYER_COLUMNS = [
     "norm_macro_precision",
     "raw_macro_recall",
     "norm_macro_recall",
+    "agreement_with_model_pred_norm",
+    "agreement_with_model_pred_raw",
+    "agreement_with_model_pred_norm_restricted",
+    "agreement_with_model_pred_raw_restricted",
     "n_examples",
     "used_in_main_plots",
     "accuracy_rank_within_probe",
@@ -451,6 +457,45 @@ def make_run_display(family_short: str, run_group: str, variant_label: str) -> s
     if run_group in {"Prompting", "Post-Training", "CAI"}:
         return f"{family_short} {run_group} {variant_label}"
     return f"{family_short} {variant_label}"
+
+
+def short_family_display(model_family: str) -> str:
+    if model_family == "llama":
+        return "Llama"
+    if model_family == "gemma":
+        return "Gemma"
+    return str(model_family).strip().title() or "Model"
+
+
+def short_variant_display(run_group: str, variant_label: str) -> str:
+    mapping: Dict[Tuple[str, str], str] = {
+        ("Prompting", "Zero-shot"): "ZS",
+        ("Prompting", "4-shot"): "4S",
+        ("Post-Training", "SFT"): "SFT",
+        ("Post-Training", "DPO"): "DPO",
+        ("CAI", "SFT"): "CAI-SFT",
+        ("CAI", "DPO (Base)"): "CAI DPO BASE",
+        ("CAI", "DPO (From SFT)"): "CAI DPO SFT",
+        ("CAI", "DPO"): "CAI DPO",
+    }
+    return mapping.get((str(run_group), str(variant_label)), str(variant_label))
+
+
+def short_run_display(model_family: str, run_group: str, variant_label: str) -> str:
+    return f"{short_family_display(model_family)} {short_variant_display(run_group, variant_label)}"
+
+
+def build_short_run_label_map(runs_subset_df: pd.DataFrame) -> Dict[str, str]:
+    label_map: Dict[str, str] = {}
+    cols = ["run_display", "model_family", "run_group", "variant_label"]
+    for _, row in runs_subset_df[cols].drop_duplicates().iterrows():
+        run_display = str(row["run_display"])
+        label_map[run_display] = short_run_display(
+            model_family=str(row["model_family"]),
+            run_group=str(row["run_group"]),
+            variant_label=str(row["variant_label"]),
+        )
+    return label_map
 
 
 def make_probe_run_display(
@@ -1590,6 +1635,18 @@ def write_chart_tables(
             caption="Probe-layer macro recall comparison for each probe setup.",
             label="tab:probe-layer-macrorecall-comparison",
         )
+        _write_probe_layer_table(
+            base_name="probe_layer_model_agreement_norm_comparison",
+            metric_col="agreement_with_model_pred_norm",
+            caption="Probe-layer agreement with model normalized predictions for each probe setup.",
+            label="tab:probe-layer-model-agreement-norm-comparison",
+        )
+        _write_probe_layer_table(
+            base_name="probe_layer_model_agreement_raw_comparison",
+            metric_col="agreement_with_model_pred_raw",
+            caption="Probe-layer agreement with model raw predictions for each probe setup.",
+            label="tab:probe-layer-model-agreement-raw-comparison",
+        )
 
     non_probe_runs = runs_df[~runs_df["is_probe"].fillna(False)].copy()
     norm_delta = non_probe_runs.copy()
@@ -1827,36 +1884,105 @@ def make_bar_plots(
             if not class_no_probe_df.empty:
                 class_no_probe_df = apply_run_order(class_no_probe_df, no_probe_order)
                 no_probe_class_pending = pending_annotation_df(no_probe_runs, no_probe_order, y_value=0.03)
-                metric_no_probe_plot = (
-                    ggplot(class_no_probe_df, aes(x="run_display", y=metric_col, fill="behavior_class_display"))
-                    + geom_col(position=position_dodge(width=0.78), width=0.7)
-                    + coord_flip()
-                    + scale_fill_manual(values=PREDICTION_COLORS)
-                    + scale_y_continuous(labels=percent_format(), limits=(0.0, 1.0), breaks=[0.0, 0.2, 0.4, 0.6, 0.8, 1.0])
-                    + labs(
-                        title=f"{title_suffix} on When2Call {no_probe_suffix}",
-                        x="",
-                        y=y_label,
-                        fill="Class",
+                if metric_col == "recall":
+                    short_label_map = build_short_run_label_map(no_probe_runs)
+                    class_no_probe_df["model_panel"] = class_no_probe_df["model_family"].map(
+                        {"llama": "Llama", "gemma": "Gemma"}
+                    ).fillna(class_no_probe_df["model_family"])
+                    class_no_probe_df["model_panel"] = pd.Categorical(
+                        class_no_probe_df["model_panel"],
+                        categories=["Llama", "Gemma"],
+                        ordered=True,
                     )
-                    + theme_bw()
-                    + theme(figure_size=(12, 7), axis_text_y=element_text(size=9))
-                )
-                if not no_probe_class_pending.empty:
-                    metric_no_probe_plot = metric_no_probe_plot + geom_text(
-                        data=no_probe_class_pending,
-                        mapping=aes(x="run_display", y="y", label="label"),
-                        inherit_aes=False,
-                        color="#6c757d",
-                        size=9,
+                    metric_no_probe_plot = (
+                        ggplot(class_no_probe_df, aes(x="run_display", y=metric_col, fill="behavior_class_display"))
+                        + geom_col(position=position_dodge(width=0.78), width=0.7)
+                        + coord_flip()
+                        + facet_wrap("~model_panel", ncol=1, scales="free_y")
+                        + scale_x_discrete(labels=short_label_map)
+                        + scale_fill_manual(values=PREDICTION_COLORS)
+                        + scale_y_continuous(
+                            labels=percent_format(),
+                            limits=(0.0, 1.0),
+                            breaks=[0.0, 0.2, 0.4, 0.6, 0.8, 1.0],
+                        )
+                        + labs(
+                            title=f"{title_suffix} on When2Call {no_probe_suffix}",
+                            x="",
+                            y=y_label,
+                            fill="Class",
+                        )
+                        + theme_bw(base_size=18)
+                        + theme(
+                            figure_size=(9, 18),
+                            axis_text_y=element_text(size=18),
+                            axis_text_x=element_text(size=17),
+                            strip_text=element_text(size=18),
+                            legend_position="bottom",
+                            legend_title=element_text(size=16),
+                            legend_text=element_text(size=15),
+                            plot_title=element_text(size=20),
+                        )
                     )
-                save_plot_multi(
-                    metric_no_probe_plot,
-                    figures_dir=figures_dir,
-                    base_name=f"{base_name}_without_probe",
-                    width=12,
-                    height=7,
-                )
+                    if not no_probe_class_pending.empty:
+                        panel_map = no_probe_runs[["run_display", "model_family"]].drop_duplicates().copy()
+                        panel_map["model_panel"] = panel_map["model_family"].map(
+                            {"llama": "Llama", "gemma": "Gemma"}
+                        ).fillna(panel_map["model_family"])
+                        pending_for_facets = no_probe_class_pending.merge(
+                            panel_map[["run_display", "model_panel"]],
+                            on="run_display",
+                            how="left",
+                        )
+                        metric_no_probe_plot = metric_no_probe_plot + geom_text(
+                            data=pending_for_facets,
+                            mapping=aes(x="run_display", y="y", label="label"),
+                            inherit_aes=False,
+                            color="#6c757d",
+                            size=12,
+                        )
+                    save_plot_multi(
+                        metric_no_probe_plot,
+                        figures_dir=figures_dir,
+                        base_name=f"{base_name}_without_probe",
+                        width=9,
+                        height=18,
+                    )
+                else:
+                    metric_no_probe_plot = (
+                        ggplot(class_no_probe_df, aes(x="run_display", y=metric_col, fill="behavior_class_display"))
+                        + geom_col(position=position_dodge(width=0.78), width=0.7)
+                        + coord_flip()
+                        + scale_fill_manual(values=PREDICTION_COLORS)
+                        + scale_y_continuous(
+                            labels=percent_format(),
+                            limits=(0.0, 1.0),
+                            breaks=[0.0, 0.2, 0.4, 0.6, 0.8, 1.0],
+                        )
+                        + labs(
+                            title=f"{title_suffix} on When2Call {no_probe_suffix}",
+                            x="",
+                            y=y_label,
+                            fill="Class",
+                        )
+                        + theme_bw()
+                        + theme(figure_size=(12, 7), axis_text_y=element_text(size=9))
+                    )
+                    if not no_probe_class_pending.empty:
+                        metric_no_probe_plot = metric_no_probe_plot + geom_text(
+                            data=no_probe_class_pending,
+                            mapping=aes(x="run_display", y="y", label="label"),
+                            inherit_aes=False,
+                            color="#6c757d",
+                            size=9,
+                        )
+                    save_plot_multi(
+                        metric_no_probe_plot,
+                        figures_dir=figures_dir,
+                        base_name=f"{base_name}_without_probe",
+                        width=12,
+                        height=7,
+                    )
 
     if not direct_df.empty:
         direct_plot_df = apply_run_order(direct_df, run_order)
@@ -2162,6 +2288,18 @@ def make_probe_only_plots(*, probe_layers_df: pd.DataFrame, figures_dir: Path) -
         title="Probe Layer Macro Recall on When2Call",
         base_name="probe_layer_macro_recall_comparison",
     )
+    _plot_probe_metric(
+        metric_col="agreement_with_model_pred_norm",
+        y_label="Agreement",
+        title="Probe-Model Agreement (Model Normalized Pred) on When2Call",
+        base_name="probe_layer_model_agreement_norm_comparison",
+    )
+    _plot_probe_metric(
+        metric_col="agreement_with_model_pred_raw",
+        y_label="Agreement",
+        title="Probe-Model Agreement (Model Raw Pred) on When2Call",
+        base_name="probe_layer_model_agreement_raw_comparison",
+    )
 
 
 def main() -> None:
@@ -2314,6 +2452,10 @@ def main() -> None:
                 layer_macro_f1 = 0.0
                 layer_macro_precision = 0.0
                 layer_macro_recall = 0.0
+                agreement_norm = 0.0
+                agreement_raw = 0.0
+                agreement_norm_restricted = 0.0
+                agreement_raw_restricted = 0.0
             else:
                 layer_accuracy, layer_macro_f1 = probe_layer_score(layer_payload)
                 class_report = probe_vs_gold.get("classification_report", {}) or {}
@@ -2323,6 +2465,16 @@ def main() -> None:
                 )
                 layer_macro_recall = float(
                     probe_vs_gold.get("macro_recall", macro_avg.get("recall", 0.0)) or 0.0
+                )
+                probe_vs_model_norm = layer_payload.get("probe_vs_model_pred_norm", {}) or {}
+                probe_vs_model_raw = layer_payload.get("probe_vs_model_pred_raw", {}) or {}
+                agreement_norm = float(probe_vs_model_norm.get("overall_agreement", 0.0) or 0.0)
+                agreement_raw = float(probe_vs_model_raw.get("overall_agreement", 0.0) or 0.0)
+                agreement_norm_restricted = float(
+                    ((probe_vs_model_norm.get("restricted_to_probe_label_space") or {}).get("accuracy", 0.0) or 0.0)
+                )
+                agreement_raw_restricted = float(
+                    ((probe_vs_model_raw.get("restricted_to_probe_label_space") or {}).get("accuracy", 0.0) or 0.0)
                 )
             probe_layer_records.append(
                 {
@@ -2345,6 +2497,10 @@ def main() -> None:
                     "norm_macro_precision": layer_macro_precision,
                     "raw_macro_recall": layer_macro_recall,
                     "norm_macro_recall": layer_macro_recall,
+                    "agreement_with_model_pred_norm": agreement_norm,
+                    "agreement_with_model_pred_raw": agreement_raw,
+                    "agreement_with_model_pred_norm_restricted": agreement_norm_restricted,
+                    "agreement_with_model_pred_raw_restricted": agreement_raw_restricted,
                     "n_examples": n_examples,
                     "used_in_main_plots": bool(layer_tag == best_layer_tag),
                     "accuracy_rank_within_probe": 0,

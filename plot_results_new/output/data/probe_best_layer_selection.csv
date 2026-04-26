@@ -1,9 +1,9 @@
 probe_parent_key,probe_parent_display,run_key,run_display,variant_label,norm_accuracy,norm_macro_f1,selection_reason
 llama32_3b_probe_base,Llama Probe Prompting Zero-shot,llama32_3b_probe_base:middle,Llama Probe Prompting Zero-shot (Middle layer),Middle layer,0.5473713033953997,0.5498475659081151,Highest accuracy
-llama32_3b_probe_4shot,Llama Probe Prompting 4-shot,llama32_3b_probe_4shot:middle,Llama Probe Prompting 4-shot (Middle layer),Middle layer,0.0,0.0,Pending (corrupted 4-shot probe)
+llama32_3b_probe_4shot,Llama Probe Prompting 4-shot,llama32_3b_probe_4shot:middle,Llama Probe Prompting 4-shot (Middle layer),Middle layer,0.621303395399781,0.6234938691796971,Highest accuracy
 llama32_3b_sft_probe,Llama Probe Post-Training SFT,llama32_3b_sft_probe:layer_75pct,Llama Probe Post-Training SFT (75% depth layer),75% depth layer,0.6136363636363636,0.6063840379650012,Highest accuracy
 llama32_3b_dpo_probe,Llama Probe Post-Training DPO,llama32_3b_dpo_probe:last,Llama Probe Post-Training DPO (Last layer),Last layer,0.5531215772179627,0.5459590759093427,Highest accuracy
 gemma3_4b_probe_base,Gemma Probe Prompting Zero-shot,gemma3_4b_probe_base:layer_75pct,Gemma Probe Prompting Zero-shot (75% depth layer),75% depth layer,0.4871303395399781,0.48268771105778424,Highest accuracy
-gemma3_4b_probe_4shot,Gemma Probe Prompting 4-shot,gemma3_4b_probe_4shot:middle,Gemma Probe Prompting 4-shot (Middle layer),Middle layer,0.0,0.0,Pending (corrupted 4-shot probe)
+gemma3_4b_probe_4shot,Gemma Probe Prompting 4-shot,gemma3_4b_probe_4shot:middle,Gemma Probe Prompting 4-shot (Middle layer),Middle layer,0.5566812705366923,0.558,Highest accuracy
 gemma3_4b_sft_probe,Gemma Probe Post-Training SFT,gemma3_4b_sft_probe:layer_75pct,Gemma Probe Post-Training SFT (75% depth layer),75% depth layer,0.6117196056955093,0.6117965330712928,Highest accuracy
 gemma3_4b_dpo_probe,Gemma Probe Post-Training DPO,gemma3_4b_dpo_probe:last,Gemma Probe Post-Training DPO (Last layer),Last layer,0.5128696604600219,0.5061486364329238,Highest accuracy
