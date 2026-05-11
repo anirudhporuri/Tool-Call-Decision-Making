@@ -17,8 +17,8 @@
     Gemma Prompting 4-shot & 0.239 & 0.035 & 0.045 & 0.682 \\
     Gemma Post-Training SFT & 0.264 & 0.019 & 0.065 & 0.653 \\
     Gemma Post-Training DPO & 0.252 & 0.034 & 0.055 & 0.659 \\
-    Gemma CAI SFT & 0.364 & 0.038 & \textbf{0.011} & 0.587 \\
-    Gemma CAI DPO (From SFT) & 0.000 & 0.000 & 0.000 & 0.000 \\
+    Gemma CAI SFT & 0.364 & 0.038 & 0.011 & 0.587 \\
+    Gemma CAI DPO (From SFT) & 0.364 & 0.038 & \textbf{0.010} & 0.588 \\
     \bottomrule
   \end{tabular}
   \caption{Normalization outcome fractions by run (no probe).}

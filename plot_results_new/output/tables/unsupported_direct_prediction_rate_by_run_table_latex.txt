@@ -22,7 +22,7 @@
     Gemma Post-Training SFT & 0.183 & 0.293 & +0.110 \\
     Gemma Post-Training DPO & 0.188 & 0.256 & +0.068 \\
     Gemma CAI SFT & 0.021 & 0.042 & +0.021 \\
-    Gemma CAI DPO (From SFT) & 0.000 & 0.000 & +0.000 \\
+    Gemma CAI DPO (From SFT) & 0.021 & 0.042 & +0.021 \\
     Gemma Probe Prompting Zero-shot (75\% depth layer) & \textbf{0.000} & \textbf{0.000} & \textbf{+0.000} \\
     Gemma Probe Prompting 4-shot (Middle layer) & \textbf{0.000} & \textbf{0.000} & \textbf{+0.000} \\
     Gemma Probe Post-Training SFT (75\% depth layer) & \textbf{0.000} & \textbf{0.000} & \textbf{+0.000} \\

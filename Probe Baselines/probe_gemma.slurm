@@ -9,13 +9,6 @@
 #SBATCH --mem=32g
 #SBATCH --gres=gpu:rtxa5000:1
 
-# Submit from the Probe Baselines directory or with an absolute path, for example:
-#   sbatch probe_class.slurm
-# Override optional settings at submit time, for example:
-#   HF_TOKEN=... sbatch probe_class.slurm
-#   sbatch probe_class.slurm --reuse-features
-#   sbatch probe_class.slurm --load-in-4bit
-
 set -euo pipefail
 
 source ~/.bashrc
@@ -25,7 +18,6 @@ GEMMA_MODEL_PATH="/fs/class-projects/spring2026/cmsc848q/mukunds/google__gemma-3
 GEMMA_MODEL_ID="google/gemma-3-4b-it"
 
 echo "Activating virtualenv at ${VENV_DIR}"
-# shellcheck disable=SC1091
 source "${VENV_DIR}/bin/activate"
 
 OUTPUT_DIR="${REPO_ROOT}/Probe Baselines/outputs/gemma3_4b_probe_base"

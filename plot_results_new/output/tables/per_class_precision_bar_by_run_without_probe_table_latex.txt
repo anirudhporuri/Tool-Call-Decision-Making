@@ -19,7 +19,7 @@
     Gemma Post-Training DPO & 0.421 & 0.298 & 0.426 \\
     Gemma CAI SFT & 0.399 & 0.418 & \textbf{0.960} \\
     Gemma CAI DPO (Base) & 0.492 & 0.414 & 0.907 \\
-    Gemma CAI DPO (From SFT) & 0.000 & 0.000 & 0.000 \\
+    Gemma CAI DPO (From SFT) & 0.398 & 0.433 & 0.959 \\
     \bottomrule
   \end{tabular}
   \caption{Per-class precision (no probe).}

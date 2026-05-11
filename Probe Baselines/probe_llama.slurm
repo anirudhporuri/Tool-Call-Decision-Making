@@ -9,13 +9,6 @@
 #SBATCH --mem=32g
 #SBATCH --gres=gpu:1
 
-# Submit from the Probe Baselines directory or with an absolute path, for example:
-#   sbatch probe_llama_class.slurm
-# Override optional settings at submit time, for example:
-#   HF_TOKEN=... sbatch probe_llama_class.slurm
-#   sbatch probe_llama_class.slurm --reuse-features
-#   sbatch probe_llama_class.slurm --load-in-4bit
-
 set -euo pipefail
 
 source ~/.bashrc
@@ -23,7 +16,6 @@ REPO_ROOT="/fs/classhomes/mukunds/Tool-Call-Decision-Making"
 VENV_DIR="${REPO_ROOT}/.venv"
 
 echo "Activating virtualenv at ${VENV_DIR}"
-# shellcheck disable=SC1091
 source "${VENV_DIR}/bin/activate"
 
 OUTPUT_DIR="${REPO_ROOT}/Probe Baselines/outputs/llama32_3b_probe_base"

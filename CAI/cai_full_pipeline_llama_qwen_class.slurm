@@ -9,11 +9,6 @@
 #SBATCH --mem=32g
 #SBATCH --gres=gpu:1
 
-# Llama full pipeline with Qwen 3.5 9B for SFT critiques and DPO judging.
-# Submit with:
-#   sbatch cai_full_pipeline_llama_qwen_class.slurm
-# Qwen stays on the current Transformers + runtime 4-bit path in this setup.
-
 set -euo pipefail
 
 source ~/.bashrc
@@ -22,7 +17,6 @@ VENV_DIR="${REPO_ROOT}/.venv"
 LLAMA_BASE_MODEL="meta-llama/Llama-3.2-3B-Instruct"
 
 echo "Activating virtualenv at ${VENV_DIR}"
-# shellcheck disable=SC1091
 source "${VENV_DIR}/bin/activate"
 
 python3 -u "${REPO_ROOT}/CAI/cai_full_pipeline_common.py" \

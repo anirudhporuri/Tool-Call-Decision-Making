@@ -1,11 +1,7 @@
 # Bar-Only Analysis Summary
 
-- Generated: **2026-04-24 23:44:43**
+- Generated: **2026-05-04 22:12:10**
 - Runs analyzed: **22**
-- Placeholder runs injected: **1**
-
-## Pending Gemma CAI Placeholders
-
-- `gemma_self_full_dpo_from_sft_model_eval`
+- Placeholder runs injected: **0**
 
 Heatmaps are intentionally omitted in this bar-only report.

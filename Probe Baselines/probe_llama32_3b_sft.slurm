@@ -9,13 +9,6 @@
 #SBATCH --mem=32g
 #SBATCH --gres=gpu:1
 
-# Submit from the Probe Baselines directory or with an absolute path, for example:
-#   sbatch probe_llama32_3b_sft.slurm
-# Override optional settings at submit time, for example:
-#   HF_TOKEN=... sbatch probe_llama32_3b_sft.slurm
-#   sbatch probe_llama32_3b_sft.slurm --reuse-features
-#   sbatch probe_llama32_3b_sft.slurm --load-in-4bit
-
 set -euo pipefail
 
 source ~/.bashrc

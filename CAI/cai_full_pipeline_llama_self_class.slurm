@@ -9,12 +9,6 @@
 #SBATCH --mem=32g
 #SBATCH --gres=gpu:1
 
-# Llama full pipeline with self-critiques and self-judging.
-# Submit with:
-#   sbatch cai_full_pipeline_llama_self_class.slurm
-# Optional overrides still work, for example:
-#   HF_TOKEN=... sbatch cai_full_pipeline_llama_self_class.slurm --no-skip-completed
-
 set -euo pipefail
 
 source ~/.bashrc
@@ -23,7 +17,6 @@ VENV_DIR="${REPO_ROOT}/.venv"
 LLAMA_BASE_MODEL="meta-llama/Llama-3.2-3B-Instruct"
 
 echo "Activating virtualenv at ${VENV_DIR}"
-# shellcheck disable=SC1091
 source "${VENV_DIR}/bin/activate"
 
 python3 -u "${REPO_ROOT}/CAI/cai_full_pipeline_common.py" \

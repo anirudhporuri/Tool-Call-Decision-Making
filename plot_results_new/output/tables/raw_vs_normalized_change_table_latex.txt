@@ -19,7 +19,7 @@
     Gemma Post-Training DPO & 0.307 & 0.287 & -0.021 & 0.247 & 0.242 & -0.005 \\
     Gemma CAI SFT & 0.375 & 0.402 & +0.027 & 0.174 & 0.211 & +0.037 \\
     Gemma CAI DPO (Base) & 0.438 & 0.523 & +0.085 & 0.263 & 0.352 & +0.089 \\
-    Gemma CAI DPO (From SFT) & 0.000 & 0.000 & +0.000 & 0.000 & 0.000 & +0.000 \\
+    Gemma CAI DPO (From SFT) & 0.374 & 0.402 & +0.028 & 0.173 & 0.210 & +0.037 \\
     \bottomrule
   \end{tabular}
   \caption{Raw vs. normalized scoring comparison by run (no probe).}

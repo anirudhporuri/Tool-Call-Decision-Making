@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 from __future__ import annotations
 
 import argparse
@@ -13,7 +12,7 @@ from typing import Callable, List, Optional, Sequence
 
 try:
     from huggingface_hub import snapshot_download
-except ImportError:  # pragma: no cover - surfaced at runtime on cluster.
+except ImportError:
     snapshot_download = None
 
 

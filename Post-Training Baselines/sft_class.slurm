@@ -10,9 +10,6 @@
 #SBATCH --mem=64g
 #SBATCH --gres=gpu:1
 
-# Submit with something like:
-# sbatch sft_class.slurm meta-llama/Llama-3.2-3B-Instruct llama outputs/llama_sft
-
 set -euo pipefail
 mkdir -p logs
 
@@ -20,13 +17,6 @@ MODEL_NAME_OR_PATH="${1:?arg1=model_name_or_path}"
 MODEL_FAMILY="${2:?arg2=model_family}"
 OUTPUT_DIR="${3:?arg3=output_dir}"
 TRAIN_FILE="${4:-}"
-
-# Activate your environment here.
-# Examples:
-# source ~/miniconda3/etc/profile.d/conda.sh
-# conda activate your-env
-# or
-# source ~/venvs/when2call/bin/activate
 
 cd "$(dirname "$0")"
 export TOKENIZERS_PARALLELISM=false

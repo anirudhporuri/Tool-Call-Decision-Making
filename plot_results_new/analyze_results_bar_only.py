@@ -469,8 +469,8 @@ def short_family_display(model_family: str) -> str:
 
 def short_variant_display(run_group: str, variant_label: str) -> str:
     mapping: Dict[Tuple[str, str], str] = {
-        ("Prompting", "Zero-shot"): "ZS",
-        ("Prompting", "4-shot"): "4S",
+        ("Prompting", "Zero-shot"): "0-SHOT",
+        ("Prompting", "4-shot"): "4-SHOT",
         ("Post-Training", "SFT"): "SFT",
         ("Post-Training", "DPO"): "DPO",
         ("CAI", "SFT"): "CAI-SFT",
@@ -485,16 +485,22 @@ def short_run_display(model_family: str, run_group: str, variant_label: str) -> 
     return f"{short_family_display(model_family)} {short_variant_display(run_group, variant_label)}"
 
 
-def build_short_run_label_map(runs_subset_df: pd.DataFrame) -> Dict[str, str]:
+def build_short_run_label_map(runs_subset_df: pd.DataFrame, include_family: bool = True) -> Dict[str, str]:
     label_map: Dict[str, str] = {}
     cols = ["run_display", "model_family", "run_group", "variant_label"]
     for _, row in runs_subset_df[cols].drop_duplicates().iterrows():
         run_display = str(row["run_display"])
-        label_map[run_display] = short_run_display(
-            model_family=str(row["model_family"]),
-            run_group=str(row["run_group"]),
-            variant_label=str(row["variant_label"]),
-        )
+        if include_family:
+            label_map[run_display] = short_run_display(
+                model_family=str(row["model_family"]),
+                run_group=str(row["run_group"]),
+                variant_label=str(row["variant_label"]),
+            )
+        else:
+            label_map[run_display] = short_variant_display(
+                run_group=str(row["run_group"]),
+                variant_label=str(row["variant_label"]),
+            )
     return label_map
 
 
@@ -1885,7 +1891,7 @@ def make_bar_plots(
                 class_no_probe_df = apply_run_order(class_no_probe_df, no_probe_order)
                 no_probe_class_pending = pending_annotation_df(no_probe_runs, no_probe_order, y_value=0.03)
                 if metric_col == "recall":
-                    short_label_map = build_short_run_label_map(no_probe_runs)
+                    short_label_map = build_short_run_label_map(no_probe_runs, include_family=False)
                     class_no_probe_df["model_panel"] = class_no_probe_df["model_family"].map(
                         {"llama": "Llama", "gemma": "Gemma"}
                     ).fillna(class_no_probe_df["model_family"])

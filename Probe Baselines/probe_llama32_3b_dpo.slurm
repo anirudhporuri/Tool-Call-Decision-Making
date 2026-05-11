@@ -9,13 +9,6 @@
 #SBATCH --mem=32g
 #SBATCH --gres=gpu:1
 
-# Submit from the Probe Baselines directory or with an absolute path, for example:
-#   sbatch probe_llama32_3b_dpo.slurm
-# Override optional settings at submit time, for example:
-#   HF_TOKEN=... sbatch probe_llama32_3b_dpo.slurm
-#   sbatch probe_llama32_3b_dpo.slurm --reuse-features
-#   sbatch probe_llama32_3b_dpo.slurm --load-in-4bit
-
 set -euo pipefail
 
 source ~/.bashrc
@@ -24,7 +17,6 @@ VENV_DIR="${REPO_ROOT}/.venv"
 LLAMA_BASE_MODEL_DIR="${REPO_ROOT}/cluster_cache/model_cache/meta-llama__Llama-3.2-3B-Instruct"
 
 echo "Activating virtualenv at ${VENV_DIR}"
-# shellcheck disable=SC1091
 source "${VENV_DIR}/bin/activate"
 
 OUTPUT_DIR="${REPO_ROOT}/Probe Baselines/outputs/llama32_3b_dpo_probe"

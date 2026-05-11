@@ -12,15 +12,15 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 try:
     import torch
-except ImportError:  # pragma: no cover - handled at runtime when generation is invoked
-    torch = None  # type: ignore[assignment]
+except ImportError:
+    torch = None
 
 try:
     from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
-except ImportError:  # pragma: no cover - handled at runtime when generation is invoked
-    AutoModelForCausalLM = None  # type: ignore[assignment]
-    AutoTokenizer = None  # type: ignore[assignment]
-    BitsAndBytesConfig = None  # type: ignore[assignment]
+except ImportError: 
+    AutoModelForCausalLM = None
+    AutoTokenizer = None
+    BitsAndBytesConfig = None
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -29,7 +29,7 @@ POST_TRAINING_DIR = REPO_ROOT / "Post-Training Baselines"
 if str(POST_TRAINING_DIR) not in sys.path:
     sys.path.insert(0, str(POST_TRAINING_DIR))
 
-from w2c_train_format import build_training_prompt, split_context_and_target  # noqa: E402
+from w2c_train_format import build_training_prompt, split_context_and_target
 
 
 DEFAULT_SELF_MODELS = {
@@ -254,8 +254,6 @@ def _ast_literal(node: ast.AST) -> Any:
             return ast.unparse(node)
         if isinstance(node, ast.Subscript):
             return ast.unparse(node)
-        # Preserve any remaining expression-shaped argument rather than
-        # crashing the whole CAI stage on a malformed tool-call payload.
         try:
             return ast.unparse(node)
         except Exception:
@@ -695,9 +693,6 @@ def _build_generation_config(
     generation_config.max_new_tokens = max_new_tokens
     if generation_config.pad_token_id is None:
         generation_config.pad_token_id = tokenizer.pad_token_id
-    # Preserve any model-specific stop-token configuration. Chat models like
-    # Gemma may ship multiple EOS/turn-ending ids in generation_config, and
-    # replacing that with tokenizer.eos_token_id can make generation run long.
     if generation_config.eos_token_id is None:
         generation_config.eos_token_id = tokenizer.eos_token_id
     if do_sample:
@@ -820,8 +815,6 @@ def _wrap_with_tokenizer_chat_template(tokenizer: Any, user_text: str, model_fam
         "tokenize": False,
         "add_generation_prompt": True,
     }
-    # Qwen3.5 docs specify disabling thinking for direct-response mode via
-    # tokenizer.apply_chat_template(..., enable_thinking=False).
     if model_family == "qwen":
         template_kwargs["enable_thinking"] = False
     try:
