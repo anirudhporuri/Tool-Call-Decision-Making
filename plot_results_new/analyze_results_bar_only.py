@@ -446,10 +446,12 @@ def infer_probe_source_variant(run_key: str, run_config: Dict[str, Any]) -> str:
 
 
 def family_display_names(model_family: str) -> Tuple[str, str]:
-    if model_family == "llama":
-        return "Llama 3.2 3B", "Llama"
-    if model_family == "gemma":
-        return "Gemma 3 4B", "Gemma"
+    for key, names in (
+        ("llama", ("Llama 3.2 3B", "Llama")),
+        ("gemma", ("Gemma 3 4B", "Gemma")),
+    ):
+        if model_family == key:
+            return names
     return model_family, model_family
 
 
@@ -460,10 +462,9 @@ def make_run_display(family_short: str, run_group: str, variant_label: str) -> s
 
 
 def short_family_display(model_family: str) -> str:
-    if model_family == "llama":
-        return "Llama"
-    if model_family == "gemma":
-        return "Gemma"
+    for key, family in (("llama", "Llama"), ("gemma", "Gemma")):
+        if model_family == key:
+            return family
     return str(model_family).strip().title() or "Model"
 
 

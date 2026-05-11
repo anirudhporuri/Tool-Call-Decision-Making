@@ -141,14 +141,12 @@ def load_jsonl(path: Path) -> List[Dict]:
 def family_names(model_name_or_path: str, model_family: str | None = None) -> tuple[str, str, str]:
     family_hint = (model_family or "").lower()
     model_name = model_name_or_path.lower()
-    if family_hint == "llama" or "llama" in model_name:
-        return "Llama 3.2 3B", "Llama", "llama"
-    if family_hint == "gemma" or "gemma" in model_name:
-        return "Gemma 3 4B", "Gemma", "gemma"
-    if "llama" in model_name:
-        return "Llama 3.2 3B", "Llama", "llama"
-    if "gemma" in model_name:
-        return "Gemma 3 4B", "Gemma", "gemma"
+    for key, family_name, short_family in (
+        ("llama", "Llama 3.2 3B", "Llama"),
+        ("gemma", "Gemma 3 4B", "Gemma"),
+    ):
+        if family_hint == key or key in model_name:
+            return family_name, short_family, key
     return model_name_or_path, model_name_or_path, model_name_or_path.lower()
 
 

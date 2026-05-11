@@ -808,6 +808,15 @@ def _wrap_qwen_chat(user_text: str) -> str:
     return f"<|im_start|>user\n{user_text}<|im_end|>\n<|im_start|>assistant\n"
 
 
+CHAT_TEMPLATE_FAMILIES = {"qwen", "gpt-oss", "phi", "mistral"}
+CHAT_WRAPPERS = {
+    "llama": _wrap_llama_chat,
+    "gemma": _wrap_gemma_chat,
+    "qwen": _wrap_qwen_chat,
+}
+RAW_CHAT_FAMILIES = {"gpt-oss", "phi", "mistral"}
+
+
 def _wrap_with_tokenizer_chat_template(tokenizer: Any, user_text: str, model_family: str) -> Optional[str]:
     if tokenizer is None or not hasattr(tokenizer, "apply_chat_template"):
         return None
@@ -828,15 +837,12 @@ def _wrap_with_tokenizer_chat_template(tokenizer: Any, user_text: str, model_fam
 
 def wrap_chat_prompt(model_family: str, user_text: str, tokenizer: Any = None) -> str:
     template_wrapped = _wrap_with_tokenizer_chat_template(tokenizer, user_text, model_family)
-    if template_wrapped is not None and model_family in {"qwen", "gpt-oss", "phi", "mistral"}:
+    if template_wrapped is not None and model_family in CHAT_TEMPLATE_FAMILIES:
         return template_wrapped
-    if model_family == "llama":
-        return _wrap_llama_chat(user_text)
-    if model_family == "gemma":
-        return _wrap_gemma_chat(user_text)
-    if model_family == "qwen":
-        return _wrap_qwen_chat(user_text)
-    if model_family in {"gpt-oss", "phi", "mistral"}:
+    wrapper = CHAT_WRAPPERS.get(model_family)
+    if wrapper is not None:
+        return wrapper(user_text)
+    if model_family in RAW_CHAT_FAMILIES:
         return user_text
     raise ValueError(f"Unsupported model_family={model_family!r}")
 
@@ -1053,7 +1059,6 @@ def evaluate_candidate_response(response_text: str, tools: Any) -> Dict[str, Any
         "structural_kind": structural_kind,
         "tool_validation": tool_validation,
     }
-
 
 def student_display_name(model_family: str) -> str:
     return "Gemma" if model_family == "gemma" else "Llama"

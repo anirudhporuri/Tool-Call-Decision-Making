@@ -97,14 +97,19 @@ def canonical_toolcall_to_gemma(text: str) -> str:
     return payload
 
 
+TOOLCALL_RENDERERS = (
+    ("llama", canonical_toolcall_to_llama),
+    ("gemma", canonical_toolcall_to_gemma),
+)
+
+
 def render_assistant_content_for_model(content: str, model_family: str) -> str:
     payload = extract_toolcall_payload(content)
     if payload is None:
         return content.strip()
-    if model_family == "llama":
-        return canonical_toolcall_to_llama(content)
-    if model_family == "gemma":
-        return canonical_toolcall_to_gemma(content)
+    for family, renderer in TOOLCALL_RENDERERS:
+        if model_family == family:
+            return renderer(content)
     raise ValueError(f"Unsupported model_family={model_family!r}")
 
 

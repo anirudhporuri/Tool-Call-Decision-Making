@@ -4,7 +4,16 @@ import argparse
 import os
 from typing import Any, Dict, List, Optional, Sequence
 
-from cai_stage_utils import load_existing_stage_records, load_selected_source_rows, ordered_stage_rows
+from cai_stage_utils import (
+    add_bool_flag,
+    env_flag,
+    env_int,
+    load_existing_stage_records,
+    load_selected_source_rows,
+    ordered_stage_rows,
+    resolve_max_examples,
+    sanitized_args_dict,
+)
 from cai_utils import (
     append_jsonl,
     build_critique_prompt,
@@ -21,24 +30,6 @@ from cai_utils import (
     unload_model,
     write_jsonl,
 )
-
-
-def env_flag(name: str, default: bool) -> bool:
-    value = os.getenv(name)
-    if value is None:
-        return default
-    return value.strip().lower() in {"1", "true", "yes", "on"}
-
-
-def env_int(name: str, default: Optional[int]) -> Optional[int]:
-    value = os.getenv(name)
-    return int(value) if value is not None else default
-
-
-def add_bool_flag(parser: argparse.ArgumentParser, name: str, default: bool, help_text: str) -> None:
-    dest = name[2:].replace("-", "_")
-    parser.add_argument(name, dest=dest, action="store_true", default=default, help=help_text)
-    parser.add_argument(f"--no-{name[2:]}", dest=dest, action="store_false", help=argparse.SUPPRESS)
 
 
 def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
@@ -70,23 +61,6 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     if args.dry_run and args.smoke_run:
         parser.error("--dry-run and --smoke-run are mutually exclusive.")
     return args
-
-
-def sanitized_args_dict(args: argparse.Namespace) -> Dict[str, Any]:
-    payload = vars(args).copy()
-    if payload.get("hf_token"):
-        payload["hf_token"] = "[REDACTED]"
-    return payload
-
-
-def resolve_max_examples(args: argparse.Namespace) -> Optional[int]:
-    if args.max_examples is not None:
-        return args.max_examples
-    if args.dry_run:
-        return args.dry_run_max_examples
-    if args.smoke_run:
-        return args.smoke_run_max_examples
-    return None
 
 
 def summarize_records(records: List[Dict[str, Any]]) -> Dict[str, Any]:

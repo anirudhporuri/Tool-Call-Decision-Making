@@ -171,18 +171,19 @@ def build_prompt(
 ) -> str:
     fewshot_examples = fewshot_examples or []
     model_family = model_family.lower()
-
-    if model_family == "llama":
-        return build_llama_prompt(question, tools, fewshot_examples)
-    if model_family == "gemma":
-        return build_gemma_prompt(question, tools, fewshot_examples)
+    builders = {"llama": build_llama_prompt, "gemma": build_gemma_prompt}
+    if model_family in builders:
+        return builders[model_family](question, tools, fewshot_examples)
     raise ValueError(f"Unsupported model_family={model_family!r}. Use 'llama' or 'gemma'.")
 
 
 def convert_test_choice_for_model(choice_label: str, choice_text: str, model_family: str) -> str:
-    if choice_label == "tool_call" and model_family.lower() == "llama":
+    if choice_label != "tool_call":
+        return choice_text.strip()
+    model_family = model_family.lower()
+    if model_family == "llama":
         return canonical_toolcall_to_llama(choice_text)
-    if choice_label == "tool_call" and model_family.lower() == "gemma":
+    if model_family == "gemma":
         payload = extract_toolcall_payload(choice_text)
         return payload if payload is not None else choice_text
     return choice_text.strip()

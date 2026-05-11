@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import argparse
+import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -7,6 +9,44 @@ from cai_utils import count_label_values, load_jsonl, source_prompt_messages, so
 
 
 SMOKE_LABEL_ORDER = ["tool_call", "request_for_info", "cannot_answer"]
+
+
+def env_flag(name: str, default: bool) -> bool:
+    value = os.getenv(name)
+    return default if value is None else value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def env_int(name: str, default: Optional[int]) -> Optional[int]:
+    value = os.getenv(name)
+    return int(value) if value is not None else default
+
+
+def env_float(name: str, default: float) -> float:
+    value = os.getenv(name)
+    return float(value) if value is not None else default
+
+
+def add_bool_flag(parser: argparse.ArgumentParser, name: str, default: bool, help_text: str) -> None:
+    dest = name[2:].replace("-", "_")
+    parser.add_argument(name, dest=dest, action="store_true", default=default, help=help_text)
+    parser.add_argument(f"--no-{name[2:]}", dest=dest, action="store_false", help=argparse.SUPPRESS)
+
+
+def sanitized_args_dict(args: argparse.Namespace) -> Dict[str, Any]:
+    payload = vars(args).copy()
+    if payload.get("hf_token"):
+        payload["hf_token"] = "[REDACTED]"
+    return payload
+
+
+def resolve_max_examples(args: argparse.Namespace) -> Optional[int]:
+    if args.max_examples is not None:
+        return args.max_examples
+    if args.dry_run:
+        return args.dry_run_max_examples
+    if args.smoke_run:
+        return args.smoke_run_max_examples
+    return None
 
 
 def source_tag(source_file: str | Path) -> str:

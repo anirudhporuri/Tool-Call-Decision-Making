@@ -1,28 +1,18 @@
 from __future__ import annotations
 
 import argparse
-import os
 from typing import Any, Dict, List, Optional, Sequence
 
 from cai_stage_utils import (
+    env_flag,
+    env_int,
     load_selected_source_rows,
     ordered_stage_rows,
+    resolve_max_examples,
     should_enforce_strict_balance,
     source_balance,
 )
 from cai_utils import count_label_values, ensure_dir, load_jsonl, save_json, write_jsonl
-
-
-def env_flag(name: str, default: bool) -> bool:
-    value = os.getenv(name)
-    if value is None:
-        return default
-    return value.strip().lower() in {"1", "true", "yes", "on"}
-
-
-def env_int(name: str, default: Optional[int]) -> Optional[int]:
-    value = os.getenv(name)
-    return int(value) if value is not None else default
 
 
 def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
@@ -45,16 +35,6 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     if args.dry_run and args.smoke_run:
         parser.error("--dry-run and --smoke-run are mutually exclusive.")
     return args
-
-
-def resolve_max_examples(args: argparse.Namespace) -> Optional[int]:
-    if args.max_examples is not None:
-        return args.max_examples
-    if args.dry_run:
-        return args.dry_run_max_examples
-    if args.smoke_run:
-        return args.smoke_run_max_examples
-    return None
 
 
 def summarize_records(records: List[Dict[str, Any]]) -> Dict[str, Any]:
