@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 from train_launcher_utils import apply_mode_defaults, build_train_argv, parse_train_launcher_args
 
 def main(argv=None):
