@@ -1,6 +1,6 @@
 # Improving Tool Call Decision Making
 
-This repository contains the code and results for evaluating when language models should call tools, ask for more information, or refuse because the requested action is unsupported.
+This repository contains the code and results for evaluating when language models should call tools, ask for more information, or refuse to answer.
 
 ## Directory Map
 
