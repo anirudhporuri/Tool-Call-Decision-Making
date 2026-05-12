@@ -15,17 +15,21 @@ This repository contains the code and results for evaluating when language model
 ## Requirements
 
 Create a Python env (3.10) and run:
+
 ```bash 
 pip3 install -r requirements.txt
-```. 
+```
+
 Full model runs need GPU access, and gated Hugging Face models require `HF_TOKEN`.
 
 ## Reproduction Order
 
 1. Build the balanced source data:
+
    ```bash
    python3 Data_Management/build_balanced_sft_dataset.py --allow-hf-fallback
    ```
+   
 2. Run prompting baselines from `Prompting Baselines/`.
 3. Train SFT/DPO baselines from `Post-Training Baselines/`, then evaluate them with the prompting evaluator.
 4. Run CAI pipelines from `CAI/`.
