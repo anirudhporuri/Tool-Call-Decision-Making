@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
-from __future__ import annotations
 
 import argparse
 import json
-from dataclasses import asdict, dataclass
+from collections import namedtuple
 from pathlib import Path
-from typing import Any, Dict, List, Optional
 
 import torch
 from datasets import Dataset, load_dataset, load_from_disk
@@ -20,16 +18,9 @@ from transformers import (
 
 from w2c_train_format import format_sft_example
 
+EncodedExample = namedtuple("EncodedExample", "input_ids attention_mask labels token_type_ids", defaults=[None])
 
-@dataclass
-class EncodedExample:
-    input_ids: List[int]
-    attention_mask: List[int]
-    labels: List[int]
-    token_type_ids: Optional[List[int]] = None
-
-
-def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
+def parse_args(argv=None):
     p = argparse.ArgumentParser(description="Train LoRA SFT on When2Call train_sft.")
     p.add_argument("--model_name_or_path", type=str, required=True)
     p.add_argument("--model_family", type=str, choices=["llama", "gemma"], required=True)
@@ -80,36 +71,32 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     p.add_argument("--dry_run", action="store_true")
     return p.parse_args(argv)
 
-
-def ensure_dir(path: str | Path) -> Path:
+def ensure_dir(path):
     p = Path(path)
     p.mkdir(parents=True, exist_ok=True)
     return p
 
-
-def save_json(path: str | Path, payload: Dict[str, Any]) -> None:
+def save_json(path, payload):
     with open(path, "w", encoding="utf-8") as f:
         json.dump(payload, f, indent=2)
 
-
-def sanitized_args_dict(args: argparse.Namespace) -> Dict[str, Any]:
+def sanitized_args_dict(args):
     payload = vars(args).copy()
     if payload.get("hf_token"):
         payload["hf_token"] = "[REDACTED]"
     return payload
 
-
-def safe_dataset_slug(*parts: str) -> str:
+def safe_dataset_slug(*parts):
     return "__".join(part.replace("/", "__") for part in parts if part)
 
-
-def get_dtype(name: str) -> torch.dtype:
+def get_dtype(name):
     return {
         "float16": torch.float16,
         "bfloat16": torch.bfloat16,
         "float32": torch.float32,
     }[name]
-def load_source_dataset(args: argparse.Namespace):
+
+def load_source_dataset(args):
     cache_dir = None
     if args.dataset_dir:
         cache_dir = str(ensure_dir(Path(args.dataset_dir) / "_hf_cache"))
@@ -134,32 +121,28 @@ def load_source_dataset(args: argparse.Namespace):
             ds = load_dataset(args.dataset_name, args.dataset_config)[args.dataset_split]
     return ds
 
-
-def train_eval_split(ds, val_size: float, seed: int):
+def train_eval_split(ds, val_size, seed):
     if val_size <= 0.0:
         return ds, None
     split = ds.train_test_split(test_size=val_size, seed=seed, shuffle=True)
     return split["train"], split["test"]
 
-
-def preprocess_row(row: Dict[str, Any], model_family: str) -> Dict[str, str]:
+def preprocess_row(row, model_family):
     prompt, target = format_sft_example(model_family=model_family, row=row)
     return {"prompt": prompt, "target": target}
 
-
-def maybe_limit_dataset(dataset: Dataset, limit: Optional[int]) -> Dataset:
+def maybe_limit_dataset(dataset, limit):
     if limit is None:
         return dataset
     return dataset.select(range(min(limit, len(dataset))))
 
-
 def encode_example(
     tokenizer,
-    prompt: str,
-    target: str,
-    max_length: int,
-    include_token_type_ids: bool = False,
-) -> EncodedExample:
+    prompt,
+    target,
+    max_length,
+    include_token_type_ids=False,
+):
     prompt_ids = tokenizer(prompt, add_special_tokens=False).input_ids
     target_ids = tokenizer(target, add_special_tokens=False).input_ids
     eos_id = tokenizer.eos_token_id
@@ -183,12 +166,12 @@ def encode_example(
         token_type_ids=token_type_ids,
     )
 
-
 class SupervisedDataCollator:
+
     def __init__(self, tokenizer):
         self.tokenizer = tokenizer
 
-    def __call__(self, features: List[Dict[str, List[int]]]) -> Dict[str, torch.Tensor]:
+    def __call__(self, features):
         input_ids = [torch.tensor(f["input_ids"], dtype=torch.long) for f in features]
         attention_mask = [torch.tensor(f["attention_mask"], dtype=torch.long) for f in features]
         labels = [torch.tensor(f["labels"], dtype=torch.long) for f in features]
@@ -210,40 +193,35 @@ class SupervisedDataCollator:
             batch["token_type_ids"] = pad_sequence(token_type_ids, batch_first=True, padding_value=0)
         return batch
 
-
-def format_dataset(dataset: Dataset, model_family: str, desc: str) -> Dataset:
+def format_dataset(dataset, model_family, desc):
     return dataset.map(
         lambda row: preprocess_row(row, model_family),
         remove_columns=dataset.column_names,
         desc=desc,
     )
 
-
 def tokenize_dataset(
-    dataset: Optional[Dataset],
+    dataset,
     tokenizer,
-    max_length: int,
-    desc: str,
-    include_token_type_ids: bool = False,
-) -> Optional[Dataset]:
+    max_length,
+    desc,
+    include_token_type_ids=False,
+):
     if dataset is None:
         return None
     return dataset.map(
-        lambda row: asdict(
-            encode_example(
-                tokenizer,
-                row["prompt"],
-                row["target"],
-                max_length,
-                include_token_type_ids=include_token_type_ids,
-            )
-        ),
+        lambda row: encode_example(
+            tokenizer,
+            row["prompt"],
+            row["target"],
+            max_length,
+            include_token_type_ids=include_token_type_ids,
+        )._asdict(),
         remove_columns=dataset.column_names,
         desc=desc,
     )
 
-
-def build_quant_config(args: argparse.Namespace) -> Optional[BitsAndBytesConfig]:
+def build_quant_config(args):
     if not args.load_in_4bit:
         return None
     return BitsAndBytesConfig(
@@ -253,21 +231,19 @@ def build_quant_config(args: argparse.Namespace) -> Optional[BitsAndBytesConfig]
         bnb_4bit_use_double_quant=True,
     )
 
-
-def save_preview(dataset: Dataset, path: Path, n: int = 20) -> None:
+def save_preview(dataset, path, n=20):
     with open(path, "w", encoding="utf-8") as f:
         for i in range(min(n, len(dataset))):
             f.write(json.dumps(dataset[i], ensure_ascii=False) + "\n")
 
-
 def write_dry_run_summary(
     *,
-    out_dir: Path,
-    train_examples: int,
-    eval_examples: int,
-    train_preview_path: Path,
-    eval_preview_path: Optional[Path],
-) -> Dict[str, Any]:
+    out_dir,
+    train_examples,
+    eval_examples,
+    train_preview_path,
+    eval_preview_path,
+):
     summary = {
         "mode": "dry_run",
         "model_loaded": False,
@@ -287,8 +263,7 @@ def write_dry_run_summary(
         json.dump(summary, f, indent=2)
     return summary
 
-
-def main(argv: Optional[List[str]] = None) -> None:
+def main(argv=None):
     args = parse_args(argv)
     out_dir = ensure_dir(args.output_dir)
     ensure_dir(out_dir / "logs")
@@ -424,7 +399,6 @@ def main(argv: Optional[List[str]] = None) -> None:
     if tokenized_eval is not None:
         eval_metrics = trainer.evaluate()
         save_json(out_dir / "eval_metrics.json", eval_metrics)
-
 
 if __name__ == "__main__":
     main()

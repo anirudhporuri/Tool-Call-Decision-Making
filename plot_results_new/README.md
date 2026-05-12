@@ -98,11 +98,7 @@ python3 plot_results_new/analyze_results_bar_only.py \
 
 ## Output Structure
 
-- `output/data/*.csv`: aggregated metrics tables
-- `output/data/probe_layer_metrics.csv`: all probe layers with ranks and `selection_reason`
-- `output/data/probe_best_layer_selection.csv`: one selected layer per probe setup
 - `output/figures/*.pdf`: bar plots
 - `output/tables/*.txt`: LaTeX tables (one per figure, with matching base name)
 - `output/tables/raw_vs_normalized_change_table_latex.txt`: legacy-style `+/-` normalization table
 - `output/tables/byte_normalization_effect_table_latex.txt`: extended `+/-` normalization impact table
-- `output/analysis_summary.md`: quick summary and placeholder list

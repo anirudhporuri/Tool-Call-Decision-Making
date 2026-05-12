@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import argparse
 import os
 import shlex
@@ -8,15 +6,12 @@ import socket
 import subprocess
 import sys
 from pathlib import Path
-from typing import Callable, List, Optional, Sequence
 
 try:
     from huggingface_hub import snapshot_download
 except ImportError:
     snapshot_download = None
 
-
-SCRIPT_PATH = Path(__file__).resolve()
 REPO_ROOT = Path("/fs/classhomes/mukunds/Tool-Call-Decision-Making")
 CAI_DIR = REPO_ROOT / "CAI"
 PT_DIR = REPO_ROOT / "Post-Training Baselines"
@@ -25,37 +20,32 @@ SOURCE_JSONL = REPO_ROOT / "Data_Management" / "generated_datasets" / "when2call
 MODEL_CACHE_DIR = REPO_ROOT / "cluster_cache" / "model_cache"
 HF_HOME_DIR = REPO_ROOT / "cluster_cache" / "hf_home"
 
-
-def timestamp() -> str:
+def timestamp():
     return subprocess.check_output(["date", "+%Y-%m-%d %H:%M:%S"], text=True).strip()
 
-
-def log(message: str) -> None:
+def log(message):
     print(f"[{timestamp()}] {message}", flush=True)
 
-
-def shell_join(parts: Sequence[str]) -> str:
+def shell_join(parts):
     return " ".join(shlex.quote(part) for part in parts)
 
-
-def env_flag(name: str, default: bool) -> bool:
+def env_flag(name, default):
     value = os.getenv(name)
-    if value is None:
-        return default
-    return value.strip().lower() in {"1", "true", "yes", "on"}
+    return default if value is None else value.strip().lower() in {"1", "true", "yes", "on"}
 
-
-def env_int(name: str, default: int) -> int:
+def env_int(name, default):
     value = os.getenv(name)
     return int(value) if value is not None else default
 
+def env_float(name, default):
+    value = os.getenv(name)
+    return float(value) if value is not None else default
 
-def ensure_dir(path: Path) -> Path:
+def ensure_dir(path):
     path.mkdir(parents=True, exist_ok=True)
     return path
 
-
-def sanitize_model_name(model_name_or_path: str) -> str:
+def sanitize_model_name(model_name_or_path):
     return (
         model_name_or_path.strip()
         .replace("/", "__")
@@ -64,8 +54,7 @@ def sanitize_model_name(model_name_or_path: str) -> str:
         .replace(" ", "_")
     )
 
-
-def local_or_cached_model_path(model_name_or_path: str, cache_root: Path, hf_token: Optional[str]) -> str:
+def local_or_cached_model_path(model_name_or_path, cache_root, hf_token):
     candidate = Path(model_name_or_path).expanduser()
     if candidate.exists():
         resolved = str(candidate.resolve())
@@ -96,13 +85,10 @@ def local_or_cached_model_path(model_name_or_path: str, cache_root: Path, hf_tok
     )
     return str(local_dir.resolve())
 
+def resolve_model_reference(model_name_or_path, cache_root, hf_token, prefetch_models,):
+    if prefetch_models:
+        return local_or_cached_model_path(model_name_or_path, cache_root, hf_token)
 
-def resolve_model_reference(
-    model_name_or_path: str,
-    cache_root: Path,
-    hf_token: Optional[str],
-    prefetch_models: bool,
-) -> str:
     candidate = Path(model_name_or_path).expanduser()
     if candidate.exists():
         resolved = str(candidate.resolve())
@@ -115,12 +101,9 @@ def resolve_model_reference(
             f"{candidate}. If this is meant to be a local checkpoint, verify the directory name/path."
         )
 
-    if prefetch_models:
-        return local_or_cached_model_path(model_name_or_path, cache_root, hf_token)
     return model_name_or_path
 
-
-def build_launcher(mode: str) -> List[str]:
+def build_launcher(mode):
     if mode == "direct":
         return []
     if mode == "srun":
@@ -129,8 +112,7 @@ def build_launcher(mode: str) -> List[str]:
         return ["srun", "--unbuffered", "--ntasks=1"]
     return []
 
-
-def run_step(label: str, workdir: Path, command: Sequence[str], env: dict[str, str], launcher: Sequence[str]) -> None:
+def run_step(label, workdir, command, env, launcher):
     full_cmd = [*launcher, *command]
     log(f"START {label}")
     log(f"WORKDIR {workdir}")
@@ -138,61 +120,36 @@ def run_step(label: str, workdir: Path, command: Sequence[str], env: dict[str, s
     subprocess.run(full_cmd, cwd=str(workdir), env=env, check=True)
     log(f"DONE {label}")
 
-
-def count_lines(path: Path) -> int:
+def count_lines(path):
     with path.open("r", encoding="utf-8") as handle:
         return sum(1 for line in handle if line.strip())
 
-
-def jsonl_has_rows(path: Path, min_rows: int = 1) -> bool:
+def jsonl_has_rows(path, min_rows=1):
     return path.is_file() and count_lines(path) >= min_rows
 
-
-def jsonl_has_exact_rows(path: Path, expected_rows: int) -> bool:
+def jsonl_has_exact_rows(path, expected_rows):
     return path.is_file() and count_lines(path) == expected_rows
 
-
-def all_paths_exist(paths: Sequence[Path]) -> bool:
+def all_paths_exist(paths):
     return all(path.is_file() for path in paths)
 
-
-def run_step_if_needed(
-    *,
-    skip_completed: bool,
-    label: str,
-    workdir: Path,
-    command: Sequence[str],
-    env: dict[str, str],
-    launcher: Sequence[str],
-    is_complete: Callable[[], bool],
-    completion_note: str,
-) -> None:
+def run_step_if_needed(*, skip_completed, label, workdir, command, env, launcher, is_complete, completion_note,):
     if skip_completed and is_complete():
         log(f"SKIP {label} ({completion_note})")
         return
     run_step(label, workdir, command, env, launcher)
 
-
-def maybe_extend(command: List[str], flag: str, value: Optional[str]) -> None:
+def maybe_extend(command, flag, value):
     if value:
         command.extend([flag, value])
 
-
-def add_bool_flag(parser: argparse.ArgumentParser, name: str, default: bool, help_text: str) -> None:
+def add_bool_flag(parser, name, default, help_text):
     dest = name[2:].replace("-", "_")
     parser.add_argument(name, dest=dest, action="store_true", default=default, help=help_text)
     parser.add_argument(f"--no-{name[2:]}", dest=dest, action="store_false", help=argparse.SUPPRESS)
 
-
-def build_model_flags(
-    *,
-    load_in_4bit: bool,
-    trust_remote_code: bool,
-    dtype: Optional[str],
-    attn_implementation: Optional[str],
-    hf_token: Optional[str],
-) -> List[str]:
-    flags: List[str] = []
+def build_model_flags(*, load_in_4bit, trust_remote_code, dtype, attn_implementation, hf_token,):
+    flags = []
     if load_in_4bit:
         flags.append("--load-in-4bit")
     if trust_remote_code:
@@ -203,8 +160,7 @@ def build_model_flags(
         flags.extend(["--hf-token", hf_token])
     return flags
 
-
-def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
+def parse_args(argv=None):
     parser = argparse.ArgumentParser(
         description="Run the full staged CAI -> SFT -> Eval -> DPO pipeline on the cluster.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
@@ -226,12 +182,12 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--critic-batch-size", type=int, default=env_int("CRITIC_BATCH_SIZE", 2))
     parser.add_argument("--base-generation-max-prompt-length", type=int, default=env_int("BASE_GENERATION_MAX_PROMPT_LENGTH", 1024))
     parser.add_argument("--critic-max-prompt-length", type=int, default=env_int("CRITIC_MAX_PROMPT_LENGTH", 1024))
-    parser.add_argument("--critique-max-new-tokens", type=int, default=int(os.getenv("CRITIQUE_MAX_NEW_TOKENS", "256")))
-    parser.add_argument("--judge-max-new-tokens", type=int, default=int(os.getenv("JUDGE_MAX_NEW_TOKENS", "128")))
-    parser.add_argument("--pair-temperature", type=float, default=float(os.getenv("PAIR_TEMPERATURE", "0.9")))
-    parser.add_argument("--pair-top-p", type=float, default=float(os.getenv("PAIR_TOP_P", "0.95")))
-    parser.add_argument("--pair-candidate-attempts", type=int, default=int(os.getenv("PAIR_CANDIDATE_ATTEMPTS", "6")))
-    parser.add_argument("--eval-num-shots", type=int, default=int(os.getenv("EVAL_NUM_SHOTS", "0")))
+    parser.add_argument("--critique-max-new-tokens", type=int, default=env_int("CRITIQUE_MAX_NEW_TOKENS", 256))
+    parser.add_argument("--judge-max-new-tokens", type=int, default=env_int("JUDGE_MAX_NEW_TOKENS", 128))
+    parser.add_argument("--pair-temperature", type=float, default=env_float("PAIR_TEMPERATURE", 0.9))
+    parser.add_argument("--pair-top-p", type=float, default=env_float("PAIR_TOP_P", 0.95))
+    parser.add_argument("--pair-candidate-attempts", type=int, default=env_int("PAIR_CANDIDATE_ATTEMPTS", 6))
+    parser.add_argument("--eval-num-shots", type=int, default=env_int("EVAL_NUM_SHOTS", 0))
     parser.add_argument("--launcher", choices=["auto", "srun", "direct"], default=os.getenv("W2C_LAUNCHER", "auto"))
     add_bool_flag(parser, "--prefetch-models", env_flag("PREFETCH_MODELS", True), "Snapshot base and critic models into the local cache before running.")
     add_bool_flag(
@@ -264,8 +220,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         args.training_load_in_4bit = args.legacy_load_in_4bit
     return args
 
-
-def main(argv: Optional[Sequence[str]] = None) -> None:
+def main(argv=None):
     args = parse_args(argv)
 
     repo_root = REPO_ROOT
@@ -385,7 +340,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         hf_token=args.hf_token,
     )
 
-    eval_flags: List[str] = []
+    eval_flags = []
     if args.trust_remote_code:
         eval_flags.append("--trust-remote-code")
     maybe_extend(eval_flags, "--dtype", args.dtype)
@@ -783,7 +738,6 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     log(f"SFT adapter: {sft_adapter_dir}")
     log(f"DPO base adapter: {dpo_base_adapter_dir}")
     log(f"DPO from SFT adapter: {dpo_sft_adapter_dir}")
-
 
 if __name__ == "__main__":
     main()

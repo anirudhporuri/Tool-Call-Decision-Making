@@ -1,37 +1,30 @@
 #!/usr/bin/env python3
-from __future__ import annotations
 
 import argparse
 import os
 from pathlib import Path
-from typing import List, Optional, Sequence
 
 from w2c_eval_mcq import main as eval_main
-
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_DATASET_DIR = REPO_ROOT / "local_datasets"
 
-
-def env_flag(name: str, default: bool) -> bool:
+def env_flag(name, default):
     value = os.getenv(name)
     if value is None:
         return default
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
-
-def env_int(name: str, default: Optional[int]) -> Optional[int]:
+def env_int(name, default):
     value = os.getenv(name)
     return int(value) if value is not None else default
 
-
-def add_bool_flag(parser: argparse.ArgumentParser, name: str, default: bool, help_text: str) -> None:
+def add_bool_flag(parser, name, default, help_text):
     dest = name[2:].replace("-", "_")
     parser.add_argument(name, dest=dest, action="store_true", default=default, help=help_text)
     parser.add_argument(f"--no-{name[2:]}", dest=dest, action="store_false", help=argparse.SUPPRESS)
 
-
-def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
+def parse_args(argv=None):
     parser = argparse.ArgumentParser(
         description="Friendly launcher for When2Call prompting evaluation.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
@@ -65,8 +58,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         parser.error("fewshot_json is required when num_shots > 0.")
     return args
 
-
-def resolve_max_examples(args: argparse.Namespace) -> Optional[int]:
+def resolve_max_examples(args):
     if args.max_examples is not None:
         return args.max_examples
     if args.dry_run:
@@ -75,8 +67,7 @@ def resolve_max_examples(args: argparse.Namespace) -> Optional[int]:
         return args.smoke_run_max_examples
     return None
 
-
-def build_eval_argv(args: argparse.Namespace) -> List[str]:
+def build_eval_argv(args):
     forwarded = [
         "--model_name_or_path",
         args.model_name_or_path,
@@ -119,11 +110,9 @@ def build_eval_argv(args: argparse.Namespace) -> List[str]:
         forwarded.append("--save_prompt_text")
     return forwarded
 
-
-def main(argv: Optional[Sequence[str]] = None) -> None:
+def main(argv=None):
     args = parse_args(argv)
     eval_main(build_eval_argv(args))
-
 
 if __name__ == "__main__":
     main()

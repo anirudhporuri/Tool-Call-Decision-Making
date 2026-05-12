@@ -1,12 +1,9 @@
 #!/usr/bin/env python3
-from __future__ import annotations
 
 import argparse
 import json
 import os
-from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Sequence, Tuple
 
 import pandas as pd
 from mizani.formatters import percent_format
@@ -16,7 +13,7 @@ MPL_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 os.environ.setdefault("MPLCONFIGDIR", str(MPL_CACHE_DIR))
 os.environ.setdefault("XDG_CACHE_HOME", str(MPL_CACHE_DIR))
 
-from plotnine import (  # noqa: E402
+from plotnine import (
     aes,
     coord_flip,
     element_text,
@@ -32,7 +29,6 @@ from plotnine import (  # noqa: E402
     theme,
     theme_bw,
 )
-
 
 FAMILY_ORDER = {"llama": 0, "gemma": 1}
 RUN_GROUP_ORDER = {"Prompting": 0, "Post-Training": 1, "CAI": 2, "Probe": 3, "Unknown": 99}
@@ -96,7 +92,7 @@ PREDICTION_COLORS = {
     "Cannot answer": "#d62728",
     "Direct": "#9467bd",
 }
-CORRUPTED_PROBE_SOURCE_VARIANTS: set[str] = set()
+CORRUPTED_PROBE_SOURCE_VARIANTS = set()
 PROBE_PENDING_REASON = "Pending probe run"
 PROBE_LAYER_COLORS = {
     "Middle layer": "#1f78b4",
@@ -208,15 +204,14 @@ PROBE_LAYER_COLUMNS = [
     "selection_reason",
 ]
 
-
-def parse_args() -> argparse.Namespace:
+def parse_args():
     repo_root = Path(__file__).resolve().parents[1]
     default_runs_dir = repo_root / "hmm"
     default_probe_runs_dir = repo_root / "hmm" / "Probe Evals"
     default_output_dir = Path(__file__).resolve().parent / "output"
 
     parser = argparse.ArgumentParser(
-        description="Bar-only analysis for hmm snapshot (Prompting + Post-Training + CAI + Probe) with pending Gemma CAI placeholders.",
+        description="Generate When2Call bar plots and LaTeX tables from hmm snapshot outputs.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument(
@@ -237,18 +232,15 @@ def parse_args() -> argparse.Namespace:
     )
     return parser.parse_args()
 
-
-def ensure_dir(path: Path) -> Path:
+def ensure_dir(path):
     path.mkdir(parents=True, exist_ok=True)
     return path
 
-
-def load_json(path: Path) -> Dict[str, Any]:
+def load_json(path):
     return json.loads(path.read_text(encoding="utf-8"))
 
-
-def read_jsonl(path: Path) -> List[Dict[str, Any]]:
-    rows: List[Dict[str, Any]] = []
+def read_jsonl(path):
+    rows = []
     with path.open("r", encoding="utf-8") as handle:
         for line in handle:
             line = line.strip()
@@ -256,8 +248,7 @@ def read_jsonl(path: Path) -> List[Dict[str, Any]]:
                 rows.append(json.loads(line))
     return rows
 
-
-def infer_run_group_from_source_name(name: str) -> str:
+def infer_run_group_from_source_name(name):
     key = str(name).lower()
     if "prompting" in key:
         return "Prompting"
@@ -269,11 +260,10 @@ def infer_run_group_from_source_name(name: str) -> str:
         return "Probe"
     return "Unknown"
 
-
-def _discover_leaf_run_dirs(parent: Path, required: Sequence[str]) -> List[Path]:
+def _discover_leaf_run_dirs(parent, required):
     if not parent.exists() or not parent.is_dir():
         return []
-    found: List[Path] = []
+    found = []
     for child in parent.iterdir():
         if not child.is_dir():
             continue
@@ -282,12 +272,11 @@ def _discover_leaf_run_dirs(parent: Path, required: Sequence[str]) -> List[Path]
             found.append(child)
     return sorted(found)
 
-
-def discover_run_dirs(runs_dir: Path) -> List[Tuple[Path, str]]:
+def discover_run_dirs(runs_dir):
     required = {"summary.json", "run_config.json"}
     if not runs_dir.exists():
         return []
-    grouped: List[Tuple[Path, str]] = []
+    grouped = []
     subgroup_map = {
         "Prompting": runs_dir / "Prompting Evals",
         "Post-Training": runs_dir / "Post-Training Evals",
@@ -304,8 +293,7 @@ def discover_run_dirs(runs_dir: Path) -> List[Tuple[Path, str]]:
     direct = _discover_leaf_run_dirs(runs_dir, required)
     return [(path, inferred_group) for path in direct]
 
-
-def discover_probe_dirs(probe_runs_dir: Path) -> List[Path]:
+def discover_probe_dirs(probe_runs_dir):
     required = {"probe_evaluation_summary.json", "run_config.json"}
     if not probe_runs_dir.exists():
         return []
@@ -313,8 +301,7 @@ def discover_probe_dirs(probe_runs_dir: Path) -> List[Path]:
         return _discover_leaf_run_dirs(probe_runs_dir / "Probe Evals", required)
     return _discover_leaf_run_dirs(probe_runs_dir, required)
 
-
-def infer_model_family(run_key: str, run_config: Dict[str, Any]) -> str:
+def infer_model_family(run_key, run_config):
     family = str(run_config.get("model_family", "")).lower().strip()
     model_name = str(run_config.get("model_name_or_path", "")).lower()
     haystack = f"{run_key.lower()} {family} {model_name}"
@@ -324,8 +311,7 @@ def infer_model_family(run_key: str, run_config: Dict[str, Any]) -> str:
         return "gemma"
     return family or "unknown"
 
-
-def infer_run_group(run_key: str, run_config: Dict[str, Any], source_group: str = "Unknown") -> str:
+def infer_run_group(run_key, run_config, source_group="Unknown"):
     if source_group in {"Prompting", "Post-Training", "CAI", "Probe"}:
         return source_group
     haystack = " ".join(
@@ -345,8 +331,7 @@ def infer_run_group(run_key: str, run_config: Dict[str, Any], source_group: str 
         return "Prompting"
     return "Unknown"
 
-
-def infer_eval_variant_label(run_key: str, run_config: Dict[str, Any], run_group: str) -> str:
+def infer_eval_variant_label(run_key, run_config, run_group):
     haystack = " ".join(
         [
             run_key.lower(),
@@ -392,8 +377,7 @@ def infer_eval_variant_label(run_key: str, run_config: Dict[str, Any], run_group
         return "Zero-shot"
     return f"{num_shots}-shot"
 
-
-def infer_probe_variant_label(layer_tag: str) -> str:
+def infer_probe_variant_label(layer_tag):
     key = str(layer_tag).strip().lower()
     if key in PROBE_LAYER_DISPLAY_BY_TAG:
         return PROBE_LAYER_DISPLAY_BY_TAG[key]
@@ -405,8 +389,7 @@ def infer_probe_variant_label(layer_tag: str) -> str:
         return "Last layer"
     return str(layer_tag)
 
-
-def infer_probe_eval_setting(run_key: str, run_config: Dict[str, Any]) -> str:
+def infer_probe_eval_setting(run_key, run_config):
     eval_path = str(run_config.get("eval_samples_jsonl", "")).lower()
     haystack = " ".join(
         [
@@ -421,8 +404,7 @@ def infer_probe_eval_setting(run_key: str, run_config: Dict[str, Any]) -> str:
         return "Zero-shot"
     return "Unknown"
 
-
-def infer_probe_source_variant(run_key: str, run_config: Dict[str, Any]) -> str:
+def infer_probe_source_variant(run_key, run_config):
     eval_path = str(run_config.get("eval_samples_jsonl", "")).lower()
     haystack = " ".join(
         [
@@ -444,8 +426,7 @@ def infer_probe_source_variant(run_key: str, run_config: Dict[str, Any]) -> str:
         return "Prompting Zero-shot"
     return "Unknown source"
 
-
-def family_display_names(model_family: str) -> Tuple[str, str]:
+def family_display_names(model_family):
     for key, names in (
         ("llama", ("Llama 3.2 3B", "Llama")),
         ("gemma", ("Gemma 3 4B", "Gemma")),
@@ -454,22 +435,19 @@ def family_display_names(model_family: str) -> Tuple[str, str]:
             return names
     return model_family, model_family
 
-
-def make_run_display(family_short: str, run_group: str, variant_label: str) -> str:
+def make_run_display(family_short, run_group, variant_label):
     if run_group in {"Prompting", "Post-Training", "CAI"}:
         return f"{family_short} {run_group} {variant_label}"
     return f"{family_short} {variant_label}"
 
-
-def short_family_display(model_family: str) -> str:
+def short_family_display(model_family):
     for key, family in (("llama", "Llama"), ("gemma", "Gemma")):
         if model_family == key:
             return family
     return str(model_family).strip().title() or "Model"
 
-
-def short_variant_display(run_group: str, variant_label: str) -> str:
-    mapping: Dict[Tuple[str, str], str] = {
+def short_variant_display(run_group, variant_label):
+    mapping = {
         ("Prompting", "Zero-shot"): "0-SHOT",
         ("Prompting", "4-shot"): "4-SHOT",
         ("Post-Training", "SFT"): "SFT",
@@ -481,13 +459,11 @@ def short_variant_display(run_group: str, variant_label: str) -> str:
     }
     return mapping.get((str(run_group), str(variant_label)), str(variant_label))
 
-
-def short_run_display(model_family: str, run_group: str, variant_label: str) -> str:
+def short_run_display(model_family, run_group, variant_label):
     return f"{short_family_display(model_family)} {short_variant_display(run_group, variant_label)}"
 
-
-def build_short_run_label_map(runs_subset_df: pd.DataFrame, include_family: bool = True) -> Dict[str, str]:
-    label_map: Dict[str, str] = {}
+def build_short_run_label_map(runs_subset_df, include_family=True):
+    label_map = {}
     cols = ["run_display", "model_family", "run_group", "variant_label"]
     for _, row in runs_subset_df[cols].drop_duplicates().iterrows():
         run_display = str(row["run_display"])
@@ -504,29 +480,26 @@ def build_short_run_label_map(runs_subset_df: pd.DataFrame, include_family: bool
             )
     return label_map
 
-
 def make_probe_run_display(
-    family_short: str,
-    probe_eval_setting: str,
-    layer_label: str,
-    probe_source_variant: str,
-) -> str:
+    family_short,
+    probe_eval_setting,
+    layer_label,
+    probe_source_variant,
+):
     if probe_source_variant and probe_source_variant != "Unknown source":
         return f"{family_short} Probe {probe_source_variant} ({layer_label})"
     if probe_eval_setting and probe_eval_setting != "Unknown":
         return f"{family_short} Probe Prompting {probe_eval_setting} ({layer_label})"
     return f"{family_short} Probe ({layer_label})"
 
-
-def make_probe_parent_display(family_short: str, probe_eval_setting: str, probe_source_variant: str) -> str:
+def make_probe_parent_display(family_short, probe_eval_setting, probe_source_variant):
     if probe_source_variant and probe_source_variant != "Unknown source":
         return f"{family_short} Probe {probe_source_variant}"
     if probe_eval_setting and probe_eval_setting != "Unknown":
         return f"{family_short} Probe Prompting {probe_eval_setting}"
     return f"{family_short} Probe"
 
-
-def build_probe_summary_like(layer_metrics: Dict[str, Any], n_examples: int) -> Dict[str, Any]:
+def build_probe_summary_like(layer_metrics, n_examples):
     labels = list(layer_metrics.get("confusion_matrix_labels") or [])
     confusion_matrix = layer_metrics.get("confusion_matrix") or []
     class_report = layer_metrics.get("classification_report") or {}
@@ -551,8 +524,7 @@ def build_probe_summary_like(layer_metrics: Dict[str, Any], n_examples: int) -> 
         "n_examples": int(n_examples),
     }
 
-
-def probe_layer_score(layer_payload: Dict[str, Any]) -> Tuple[float, float]:
+def probe_layer_score(layer_payload):
     probe_vs_gold = layer_payload.get("probe_vs_gold") or {}
     if not probe_vs_gold:
         return -1.0, -1.0
@@ -566,13 +538,12 @@ def probe_layer_score(layer_payload: Dict[str, Any]) -> Tuple[float, float]:
     )
     return accuracy, macro_f1
 
-
-def select_best_probe_layer(layers: Dict[str, Dict[str, Any]], layer_order: Sequence[str]) -> str | None:
+def select_best_probe_layer(layers, layer_order):
     candidates = [tag for tag in layer_order if tag in layers]
     if not candidates:
         candidates = sorted(layers.keys())
 
-    best_tag: str | None = None
+    best_tag = None
     best_score = (-1.0, -1.0)
     for layer_tag in candidates:
         score = probe_layer_score(layers.get(layer_tag) or {})
@@ -581,21 +552,20 @@ def select_best_probe_layer(layers: Dict[str, Dict[str, Any]], layer_order: Sequ
             best_score = score
     return best_tag
 
-
 def extract_class_metrics(
     *,
-    run_key: str,
-    run_display: str,
-    model_family: str,
-    run_group: str,
-    variant_label: str,
-    probe_source_variant: str = "n/a",
-    summary: Dict[str, Any],
-    is_probe: bool = False,
-    is_placeholder: bool = False,
-) -> List[Dict[str, Any]]:
+    run_key,
+    run_display,
+    model_family,
+    run_group,
+    variant_label,
+    probe_source_variant="n/a",
+    summary,
+    is_probe=False,
+    is_placeholder=False,
+):
     label_order = list(summary.get("label_order") or DEFAULT_LABEL_ORDER)
-    records: List[Dict[str, Any]] = []
+    records = []
     for scoring in ("raw", "normalized"):
         class_report = summary.get(scoring, {}).get("classification_report", {})
         cm = summary.get(scoring, {}).get("confusion_matrix", [])
@@ -635,8 +605,7 @@ def extract_class_metrics(
             )
     return records
 
-
-def normalization_outcome(gold: str, pred_raw: str, pred_norm: str) -> str:
+def normalization_outcome(gold, pred_raw, pred_norm):
     raw_correct = pred_raw == gold
     norm_correct = pred_norm == gold
     if raw_correct and norm_correct:
@@ -647,27 +616,26 @@ def normalization_outcome(gold: str, pred_raw: str, pred_norm: str) -> str:
         return "broken"
     return "stay_wrong"
 
-
 def extract_sample_level_summaries(
     *,
-    run_key: str,
-    run_display: str,
-    model_family: str,
-    run_group: str,
-    variant_label: str,
-    probe_source_variant: str = "n/a",
-    samples: List[Dict[str, Any]],
-    label_order: Sequence[str],
-    is_probe: bool = False,
-    is_placeholder: bool = False,
-) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
+    run_key,
+    run_display,
+    model_family,
+    run_group,
+    variant_label,
+    probe_source_variant="n/a",
+    samples,
+    label_order,
+    is_probe=False,
+    is_placeholder=False,
+):
     if not samples:
         return [], [], []
 
     n_examples = len(samples)
-    direct_rate_records: List[Dict[str, Any]] = []
-    outcome_records: List[Dict[str, Any]] = []
-    prediction_mix_records: List[Dict[str, Any]] = []
+    direct_rate_records = []
+    outcome_records = []
+    prediction_mix_records = []
 
     for scoring, pred_col in (("raw", "pred_raw"), ("normalized", "pred_norm")):
         direct_predictions = sum(1 for row in samples if row.get(pred_col) == "direct")
@@ -688,7 +656,7 @@ def extract_sample_level_summaries(
             }
         )
 
-        counts: Dict[str, int] = {}
+        counts = {}
         for row in samples:
             label = str(row.get(pred_col))
             counts[label] = counts.get(label, 0) + 1
@@ -735,15 +703,13 @@ def extract_sample_level_summaries(
 
     return direct_rate_records, outcome_records, prediction_mix_records
 
-
-def variant_rank_for_group(run_group: str, variant_label: str) -> int:
+def variant_rank_for_group(run_group, variant_label):
     group_order = GROUP_VARIANT_ORDER.get(run_group)
     if group_order is not None:
         return int(group_order.get(variant_label, 99))
     return int(VARIANT_ORDER.get(variant_label, 99))
 
-
-def sort_runs(df: pd.DataFrame) -> pd.DataFrame:
+def sort_runs(df):
     frame = df.copy()
     frame["family_rank"] = frame["model_family"].map(FAMILY_ORDER).fillna(99).astype(int)
     if "run_group" in frame.columns:
@@ -773,8 +739,7 @@ def sort_runs(df: pd.DataFrame) -> pd.DataFrame:
         ["family_rank", "run_group_rank", "probe_source_rank", "probe_setting_rank", "variant_rank", "run_key"]
     ).reset_index(drop=True)
 
-
-def enrich_probe_layer_selection(probe_layers_df: pd.DataFrame) -> pd.DataFrame:
+def enrich_probe_layer_selection(probe_layers_df):
     if probe_layers_df.empty:
         return probe_layers_df
 
@@ -818,20 +783,19 @@ def enrich_probe_layer_selection(probe_layers_df: pd.DataFrame) -> pd.DataFrame:
 
     return frame
 
-
 def build_probe_pending_rows(
     *,
-    run_key: str,
-    run_display: str,
-    model_family: str,
-    run_group: str,
-    variant_label: str,
-    probe_source_variant: str,
-) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
-    class_rows: List[Dict[str, Any]] = []
-    direct_rows: List[Dict[str, Any]] = []
-    outcome_rows: List[Dict[str, Any]] = []
-    pred_mix_rows: List[Dict[str, Any]] = []
+    run_key,
+    run_display,
+    model_family,
+    run_group,
+    variant_label,
+    probe_source_variant,
+):
+    class_rows = []
+    direct_rows = []
+    outcome_rows = []
+    pred_mix_rows = []
 
     for scoring in ("raw", "normalized"):
         direct_rows.append(
@@ -906,19 +870,18 @@ def build_probe_pending_rows(
 
     return class_rows, direct_rows, outcome_rows, pred_mix_rows
 
-
 def enforce_unique_run_displays(
-    runs_df: pd.DataFrame,
-    class_df: pd.DataFrame,
-    direct_df: pd.DataFrame,
-    outcome_df: pd.DataFrame,
-    prediction_mix_df: pd.DataFrame,
-) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    runs_df,
+    class_df,
+    direct_df,
+    outcome_df,
+    prediction_mix_df,
+):
     duplicate_labels = set(runs_df["run_display"].value_counts()[lambda s: s > 1].index.tolist())
     if not duplicate_labels:
         return runs_df, class_df, direct_df, outcome_df, prediction_mix_df
 
-    display_map: Dict[str, str] = {}
+    display_map = {}
     for _, row in runs_df.iterrows():
         run_key = str(row["run_key"])
         run_display = str(row["run_display"])
@@ -927,7 +890,7 @@ def enforce_unique_run_displays(
         else:
             display_map[run_key] = run_display
 
-    def _apply(frame: pd.DataFrame) -> pd.DataFrame:
+    def _apply(frame):
         if frame.empty:
             return frame
         out = frame.copy()
@@ -942,14 +905,12 @@ def enforce_unique_run_displays(
         _apply(prediction_mix_df),
     )
 
-
-def apply_run_order(df: pd.DataFrame, run_order: List[str]) -> pd.DataFrame:
+def apply_run_order(df, run_order):
     frame = df.copy()
     frame["run_display"] = pd.Categorical(frame["run_display"], categories=run_order, ordered=True)
     return frame
 
-
-def save_plot(plot_obj: Any, output_path: Path, width: float, height: float) -> None:
+def save_plot(plot_obj, output_path, width, height):
     plot_obj.save(
         filename=str(output_path),
         width=width,
@@ -959,12 +920,10 @@ def save_plot(plot_obj: Any, output_path: Path, width: float, height: float) -> 
         verbose=False,
     )
 
-
-def save_plot_multi(plot_obj: Any, *, figures_dir: Path, base_name: str, width: float, height: float) -> None:
+def save_plot_multi(plot_obj, *, figures_dir, base_name, width, height):
     save_plot(plot_obj, figures_dir / f"{base_name}.pdf", width=width, height=height)
 
-
-def pending_annotation_df(runs_df: pd.DataFrame, run_order: List[str], y_value: float) -> pd.DataFrame:
+def pending_annotation_df(runs_df, run_order, y_value):
     pending = runs_df[runs_df["is_placeholder"]][["run_display"]].drop_duplicates().copy()
     if pending.empty:
         return pending
@@ -973,8 +932,7 @@ def pending_annotation_df(runs_df: pd.DataFrame, run_order: List[str], y_value: 
     pending["label"] = "PENDING"
     return pending
 
-
-def infer_missing_gemma_cai_eval_run_keys(existing_run_keys: Iterable[str]) -> List[str]:
+def infer_missing_gemma_cai_eval_run_keys(existing_run_keys):
     existing = set(existing_run_keys)
     expected = {
         "gemma_self_full_sft_model_eval",
@@ -986,13 +944,12 @@ def infer_missing_gemma_cai_eval_run_keys(existing_run_keys: Iterable[str]) -> L
             expected.add("gemma_self_full_" + run_key[len("llama_self_full_") :])
     return sorted(key for key in expected if key not in existing)
 
-
-def build_placeholder_rows(missing_run_keys: Sequence[str]) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
-    run_rows: List[Dict[str, Any]] = []
-    class_rows: List[Dict[str, Any]] = []
-    direct_rows: List[Dict[str, Any]] = []
-    outcome_rows: List[Dict[str, Any]] = []
-    pred_mix_rows: List[Dict[str, Any]] = []
+def build_placeholder_rows(missing_run_keys):
+    run_rows = []
+    class_rows = []
+    direct_rows = []
+    outcome_rows = []
+    pred_mix_rows = []
 
     _, family_short = family_display_names("gemma")
 
@@ -1099,27 +1056,7 @@ def build_placeholder_rows(missing_run_keys: Sequence[str]) -> Tuple[List[Dict[s
 
     return run_rows, class_rows, direct_rows, outcome_rows, pred_mix_rows
 
-
-def write_summary_markdown(*, runs_df: pd.DataFrame, missing_placeholder_keys: Sequence[str], summary_path: Path) -> None:
-    lines = [
-        "# Bar-Only Analysis Summary",
-        "",
-        f"- Generated: **{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}**",
-        f"- Runs analyzed: **{len(runs_df)}**",
-        f"- Placeholder runs injected: **{len(missing_placeholder_keys)}**",
-    ]
-    if missing_placeholder_keys:
-        lines.append("")
-        lines.append("## Pending Gemma CAI Placeholders")
-        lines.append("")
-        for key in missing_placeholder_keys:
-            lines.append(f"- `{key}`")
-    lines.append("")
-    lines.append("Heatmaps are intentionally omitted in this bar-only report.")
-    summary_path.write_text("\n".join(lines), encoding="utf-8")
-
-
-def latex_escape(text: str) -> str:
+def latex_escape(text):
     return (
         str(text)
         .replace("\\", "\\textbackslash{}")
@@ -1132,27 +1069,23 @@ def latex_escape(text: str) -> str:
         .replace("}", "\\}")
     )
 
-
-def fmt_dec(value: Any, digits: int = 3) -> str:
+def fmt_dec(value, digits=3):
     return f"{float(value):.{digits}f}"
 
-
-def fmt_signed(value: Any, digits: int = 3) -> str:
+def fmt_signed(value, digits=3):
     return f"{float(value):+.{digits}f}"
 
-
-def fmt_latex_number(value: float, *, signed: bool = False, digits: int = 3, bold: bool = False) -> str:
+def fmt_latex_number(value, *, signed=False, digits=3, bold=False):
     txt = f"{float(value):+.{digits}f}" if signed else f"{float(value):.{digits}f}"
     return f"\\textbf{{{txt}}}" if bold else txt
 
-
 def column_extrema_mask(
-    numeric_rows: Sequence[Sequence[float]],
+    numeric_rows,
     *,
-    preferences: Sequence[str],
-    eligible_rows: Sequence[bool] | None = None,
-    eps: float = 1e-12,
-) -> List[List[bool]]:
+    preferences,
+    eligible_rows=None,
+    eps=1e-12,
+):
     if not numeric_rows:
         return []
     n_cols = len(numeric_rows[0])
@@ -1174,23 +1107,22 @@ def column_extrema_mask(
                 mask[row_idx][col_idx] = True
     return mask
 
-
 def build_latex_rows_with_bold(
     *,
-    labels: Sequence[str],
-    numeric_rows: Sequence[Sequence[float]],
-    preferences: Sequence[str],
-    eligible_rows: Sequence[bool] | None = None,
-    signed_cols: Sequence[int] = (),
-    digits: int = 3,
-) -> List[List[str]]:
+    labels,
+    numeric_rows,
+    preferences,
+    eligible_rows=None,
+    signed_cols=(),
+    digits=3,
+):
     extrema = column_extrema_mask(
         numeric_rows,
         preferences=preferences,
         eligible_rows=eligible_rows,
     )
     signed_col_set = set(signed_cols)
-    out: List[List[str]] = []
+    out = []
     for row_idx, label in enumerate(labels):
         row_out = [latex_escape(label)]
         for col_idx, val in enumerate(numeric_rows[row_idx]):
@@ -1205,17 +1137,16 @@ def build_latex_rows_with_bold(
         out.append(row_out)
     return out
 
-
 def write_latex_table_text(
     *,
-    output_path: Path,
-    headers: Sequence[str],
-    rows: Sequence[Sequence[str]],
-    align: str,
-    caption: str,
-    label: str,
-) -> None:
-    lines: List[str] = [
+    output_path,
+    headers,
+    rows,
+    align,
+    caption,
+    label,
+):
+    lines = [
         "% Requires: \\usepackage{booktabs}",
         "\\begin{table}[t]",
         "  \\centering",
@@ -1239,25 +1170,23 @@ def write_latex_table_text(
     )
     output_path.write_text("\n".join(lines), encoding="utf-8")
 
-
-def run_ordered_subset(df: pd.DataFrame, run_order: Sequence[str]) -> pd.DataFrame:
+def run_ordered_subset(df, run_order):
     if df.empty:
         return df.copy()
     out = df.copy()
     out["run_display"] = pd.Categorical(out["run_display"], categories=list(run_order), ordered=True)
     return out.sort_values(["run_display"]).reset_index(drop=True)
 
-
 def write_chart_tables(
     *,
-    runs_df: pd.DataFrame,
-    class_df: pd.DataFrame,
-    direct_df: pd.DataFrame,
-    outcome_df: pd.DataFrame,
-    prediction_mix_df: pd.DataFrame,
-    probe_layers_df: pd.DataFrame,
-    tables_dir: Path,
-) -> None:
+    runs_df,
+    class_df,
+    direct_df,
+    outcome_df,
+    prediction_mix_df,
+    probe_layers_df,
+    tables_dir,
+):
     run_order = runs_df["run_display"].tolist()
     no_probe_runs = runs_df[~runs_df["is_probe"].fillna(False)].copy()
     no_probe_order = no_probe_runs["run_display"].tolist()
@@ -1272,13 +1201,13 @@ def write_chart_tables(
 
     def _write_run_metric_table(
         *,
-        base_name: str,
-        metric_col: str,
-        metric_header: str,
-        run_subset: pd.DataFrame,
-        caption: str,
-        label: str,
-    ) -> None:
+        base_name,
+        metric_col,
+        metric_header,
+        run_subset,
+        caption,
+        label,
+    ):
         ordered = run_ordered_subset(run_subset, run_subset["run_display"].tolist())
         labels = [str(r["run_display"]) for _, r in ordered.iterrows()]
         numeric_rows = [[float(r[metric_col])] for _, r in ordered.iterrows()]
@@ -1405,7 +1334,7 @@ def write_chart_tables(
             label=f"tab:{base_name}-no-probe",
         )
 
-    def _write_direct_table(base_name: str, subset: pd.DataFrame, caption: str, label: str) -> None:
+    def _write_direct_table(base_name, subset, caption, label):
         pivot = (
             subset.pivot_table(index="run_display", columns="scoring", values="direct_prediction_rate", aggfunc="first")
             .reset_index()
@@ -1450,7 +1379,7 @@ def write_chart_tables(
         label="tab:unsupported-direct-rate-by-run-no-probe",
     )
 
-    def _write_outcome_table(base_name: str, subset: pd.DataFrame, caption: str, label: str) -> None:
+    def _write_outcome_table(base_name, subset, caption, label):
         pivot = (
             subset.pivot_table(index="run_display", columns="outcome", values="fraction", aggfunc="first")
             .reindex(columns=OUTCOME_ORDER)
@@ -1499,7 +1428,7 @@ def write_chart_tables(
         label="tab:normalization-outcome-by-run-no-probe",
     )
 
-    def _write_prediction_mix_table(base_name: str, subset: pd.DataFrame, caption: str, label: str) -> None:
+    def _write_prediction_mix_table(base_name, subset, caption, label):
         normalized = subset[subset["scoring"] == "normalized"].copy()
         pivot = (
             normalized.pivot_table(index="run_display", columns="label", values="fraction", aggfunc="first")
@@ -1556,7 +1485,7 @@ def write_chart_tables(
             ordered_probe_layers.groupby("probe_parent_display", observed=False)["is_placeholder"].all().to_dict()
         )
 
-        def _write_probe_layer_table(base_name: str, metric_col: str, caption: str, label: str) -> None:
+        def _write_probe_layer_table(base_name, metric_col, caption, label):
             pivot = (
                 ordered_probe_layers.pivot_table(
                     index="probe_parent_display",
@@ -1737,13 +1666,13 @@ def write_chart_tables(
 
 def make_bar_plots(
     *,
-    runs_df: pd.DataFrame,
-    class_df: pd.DataFrame,
-    direct_df: pd.DataFrame,
-    outcome_df: pd.DataFrame,
-    prediction_mix_df: pd.DataFrame,
-    figures_dir: Path,
-) -> None:
+    runs_df,
+    class_df,
+    direct_df,
+    outcome_df,
+    prediction_mix_df,
+    figures_dir,
+):
     run_order = runs_df["run_display"].tolist()
     runs_plot = apply_run_order(runs_df, run_order)
     all_runs_suffix = "(All Runs)"
@@ -2217,8 +2146,7 @@ def make_bar_plots(
                     height=6,
                 )
 
-
-def make_probe_only_plots(*, probe_layers_df: pd.DataFrame, figures_dir: Path) -> None:
+def make_probe_only_plots(*, probe_layers_df, figures_dir):
     if probe_layers_df.empty:
         return
 
@@ -2244,7 +2172,7 @@ def make_probe_only_plots(*, probe_layers_df: pd.DataFrame, figures_dir: Path) -
         pending_parent["y"] = 0.04
         pending_parent["label"] = "PENDING"
 
-    def _plot_probe_metric(metric_col: str, y_label: str, title: str, base_name: str) -> None:
+    def _plot_probe_metric(metric_col, y_label, title, base_name):
         metric_plot = (
             ggplot(probe_plot, aes(x="probe_parent_display", y=metric_col, fill="layer_display"))
             + geom_col(position=position_dodge(width=0.78), width=0.7)
@@ -2308,8 +2236,7 @@ def make_probe_only_plots(*, probe_layers_df: pd.DataFrame, figures_dir: Path) -
         base_name="probe_layer_model_agreement_raw_comparison",
     )
 
-
-def main() -> None:
+def main():
     args = parse_args()
 
     runs_dir = Path(args.runs_dir).resolve()
@@ -2318,7 +2245,6 @@ def main() -> None:
         probe_runs_dir = (runs_dir / "Probe Evals").resolve()
 
     output_dir = ensure_dir(Path(args.output_dir).resolve())
-    data_dir = ensure_dir(output_dir / "data")
     figures_dir = ensure_dir(output_dir / "figures")
     tables_dir = ensure_dir(output_dir / "tables")
 
@@ -2327,12 +2253,12 @@ def main() -> None:
         raise FileNotFoundError(f"No eval run directories found under {runs_dir}.")
     probe_dirs = discover_probe_dirs(probe_runs_dir)
 
-    run_records: List[Dict[str, Any]] = []
-    class_records: List[Dict[str, Any]] = []
-    direct_records: List[Dict[str, Any]] = []
-    outcome_records: List[Dict[str, Any]] = []
-    prediction_mix_records: List[Dict[str, Any]] = []
-    probe_layer_records: List[Dict[str, Any]] = []
+    run_records = []
+    class_records = []
+    direct_records = []
+    outcome_records = []
+    prediction_mix_records = []
+    probe_layer_records = []
 
     for run_dir, source_group in run_dirs:
         run_key = run_dir.name
@@ -2409,7 +2335,7 @@ def main() -> None:
         _, family_short = family_display_names(model_family)
         probe_parent_display = make_probe_parent_display(family_short, probe_eval_setting, probe_source_variant)
 
-        layers: Dict[str, Dict[str, Any]] = probe_eval.get("layers") or {}
+        layers = probe_eval.get("layers") or {}
         layer_order = [
             str(spec.get("tag"))
             for spec in (probe_eval.get("layer_specs") or [])
@@ -2585,7 +2511,7 @@ def main() -> None:
         )
 
         if probe_samples:
-            layer_samples: List[Dict[str, Any]] = []
+            layer_samples = []
             for sample in probe_samples:
                 probe_pred = (sample.get("probe_preds") or {}).get(best_layer_tag)
                 if probe_pred is None:
@@ -2623,7 +2549,7 @@ def main() -> None:
     if not probe_layers_df.empty:
         probe_layers_df = enrich_probe_layer_selection(probe_layers_df)
 
-    missing_placeholder_keys: List[str] = []
+    missing_placeholder_keys = []
     if not args.no_placeholders:
         missing_placeholder_keys = infer_missing_gemma_cai_eval_run_keys(runs_df["run_key"].tolist())
         placeholder_run_rows, placeholder_class_rows, placeholder_direct_rows, placeholder_outcome_rows, placeholder_predmix_rows = build_placeholder_rows(
@@ -2663,28 +2589,6 @@ def main() -> None:
     if not probe_layers_df.empty:
         probe_layers_df = sort_runs(probe_layers_df)
 
-    runs_df.to_csv(data_dir / "run_level_metrics.csv", index=False)
-    class_df.to_csv(data_dir / "class_level_metrics.csv", index=False)
-    direct_df.to_csv(data_dir / "direct_prediction_rate.csv", index=False)
-    outcome_df.to_csv(data_dir / "normalization_outcomes.csv", index=False)
-    prediction_mix_df.to_csv(data_dir / "prediction_mix.csv", index=False)
-    probe_layers_df.to_csv(data_dir / "probe_layer_metrics.csv", index=False)
-    if not probe_layers_df.empty:
-        probe_best_df = probe_layers_df[probe_layers_df["used_in_main_plots"].fillna(False)].copy()
-        probe_best_df = probe_best_df[
-            [
-                "probe_parent_key",
-                "probe_parent_display",
-                "run_key",
-                "run_display",
-                "variant_label",
-                "norm_accuracy",
-                "norm_macro_f1",
-                "selection_reason",
-            ]
-        ]
-        probe_best_df.to_csv(data_dir / "probe_best_layer_selection.csv", index=False)
-
     make_bar_plots(
         runs_df=runs_df,
         class_df=class_df,
@@ -2707,24 +2611,18 @@ def main() -> None:
         tables_dir=tables_dir,
     )
 
-    write_summary_markdown(
-        runs_df=runs_df,
-        missing_placeholder_keys=missing_placeholder_keys,
-        summary_path=output_dir / "analysis_summary.md",
-    )
-
     print(
         json.dumps(
             {
                 "runs_analyzed": int(len(runs_df)),
                 "probe_layer_rows": int(len(probe_layers_df)),
                 "placeholder_runs": int(len(missing_placeholder_keys)),
-                "output_dir": str(output_dir),
+                "figures_dir": str(figures_dir),
+                "tables_dir": str(tables_dir),
             },
             indent=2,
         )
     )
-
 
 if __name__ == "__main__":
     main()

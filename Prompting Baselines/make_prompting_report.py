@@ -1,13 +1,10 @@
 #!/usr/bin/env python3
-from __future__ import annotations
 
 import json
 import math
-from dataclasses import dataclass
+from collections import namedtuple
 from html import escape
 from pathlib import Path
-from typing import Dict, List, Sequence
-
 
 ACTIVE_LABELS = ["tool_call", "request_for_info", "cannot_answer"]
 LABEL_DISPLAY = {
@@ -88,48 +85,26 @@ RUN_PALETTE = {
     ("gemma", "CAI-DPO Cross"): "#b91c1c",
 }
 
+AggregateMetric = namedtuple("AggregateMetric", "raw normalized")
+RunMetrics = namedtuple(
+    "RunMetrics",
+    "run_key display_name legend_name label_lines model_family variant_label summary samples "
+    "aggregate_metrics normalized_per_class_f1 normalized_per_class_accuracy normalized_per_class_precision "
+    "normalized_per_class_recall normalized_confusion_active gold_support normalization_outcomes",
+)
 
-@dataclass
-class AggregateMetric:
-    raw: float
-    normalized: float
-
-
-@dataclass
-class RunMetrics:
-    run_key: str
-    display_name: str
-    legend_name: str
-    label_lines: List[str]
-    model_family: str
-    variant_label: str
-    summary: Dict
-    samples: List[Dict]
-    aggregate_metrics: Dict[str, AggregateMetric]
-    normalized_per_class_f1: Dict[str, float]
-    normalized_per_class_accuracy: Dict[str, float]
-    normalized_per_class_precision: Dict[str, float]
-    normalized_per_class_recall: Dict[str, float]
-    normalized_confusion_active: List[List[int]]
-    gold_support: Dict[str, int]
-    normalization_outcomes: Dict[str, int]
-
-
-def repo_root() -> Path:
+def repo_root():
     return Path(__file__).resolve().parent
 
-
-def ensure_dir(path: Path) -> Path:
+def ensure_dir(path):
     path.mkdir(parents=True, exist_ok=True)
     return path
 
-
-def load_json(path: Path) -> Dict:
+def load_json(path):
     return json.loads(path.read_text(encoding="utf-8"))
 
-
-def load_jsonl(path: Path) -> List[Dict]:
-    rows: List[Dict] = []
+def load_jsonl(path):
+    rows = []
     with path.open("r", encoding="utf-8") as handle:
         for line in handle:
             line = line.strip()
@@ -137,8 +112,7 @@ def load_jsonl(path: Path) -> List[Dict]:
                 rows.append(json.loads(line))
     return rows
 
-
-def family_names(model_name_or_path: str, model_family: str | None = None) -> tuple[str, str, str]:
+def family_names(model_name_or_path, model_family=None):
     family_hint = (model_family or "").lower()
     model_name = model_name_or_path.lower()
     for key, family_name, short_family in (
@@ -149,8 +123,7 @@ def family_names(model_name_or_path: str, model_family: str | None = None) -> tu
             return family_name, short_family, key
     return model_name_or_path, model_name_or_path, model_name_or_path.lower()
 
-
-def detect_variant(run_key: str, run_config: Dict) -> str:
+def detect_variant(run_key, run_config):
     haystack = " ".join(
         [
             run_key.lower(),
@@ -175,8 +148,7 @@ def detect_variant(run_key: str, run_config: Dict) -> str:
         return "4-shot"
     return "0-shot"
 
-
-def slug_to_display_name(run_key: str, run_config: Dict) -> tuple[str, str, List[str], str, str]:
+def slug_to_display_name(run_key, run_config):
     family_name, short_family, family_key = family_names(
         str(run_config["model_name_or_path"]),
         str(run_config.get("model_family", "")),
@@ -190,8 +162,7 @@ def slug_to_display_name(run_key: str, run_config: Dict) -> tuple[str, str, List
         variant_label,
     )
 
-
-def discover_run_dirs(base_dir: Path) -> List[Path]:
+def discover_run_dirs(base_dir):
     required_files = {"summary.json", "samples.jsonl", "run_config.json"}
     run_dirs = []
     for child in base_dir.iterdir():
@@ -201,18 +172,15 @@ def discover_run_dirs(base_dir: Path) -> List[Path]:
             run_dirs.append(child)
     return run_dirs
 
-
-def run_sort_key(run: RunMetrics) -> tuple[int, int, str]:
+def run_sort_key(run):
     family_rank = FAMILY_ORDER.get(run.model_family, 99)
     method_rank = METHOD_ORDER.get(run.variant_label, 99)
     return (family_rank, method_rank, run.display_name)
 
-
-def run_color(run: RunMetrics) -> str:
+def run_color(run):
     return RUN_PALETTE.get((run.model_family, run.variant_label), "#64748b")
 
-
-def compute_normalization_outcomes(samples: Sequence[Dict]) -> Dict[str, int]:
+def compute_normalization_outcomes(samples):
     outcomes = {
         "stay_correct": 0,
         "fixed": 0,
@@ -232,8 +200,7 @@ def compute_normalization_outcomes(samples: Sequence[Dict]) -> Dict[str, int]:
             outcomes["stay_wrong"] += 1
     return outcomes
 
-
-def aggregate_metrics_from_summary(summary: Dict) -> Dict[str, AggregateMetric]:
+def aggregate_metrics_from_summary(summary):
     raw_report = summary["raw"]["classification_report"]
     norm_report = summary["normalized"]["classification_report"]
     raw_weighted = raw_report["weighted avg"]
@@ -261,9 +228,8 @@ def aggregate_metrics_from_summary(summary: Dict) -> Dict[str, AggregateMetric]:
         ),
     }
 
-
-def load_runs(base_dir: Path) -> List[RunMetrics]:
-    runs: List[RunMetrics] = []
+def load_runs(base_dir):
+    runs = []
     for run_dir in discover_run_dirs(base_dir):
         run_key = run_dir.name
         summary_path = run_dir / "summary.json"
@@ -328,21 +294,18 @@ def load_runs(base_dir: Path) -> List[RunMetrics]:
         )
     return sorted(runs, key=run_sort_key)
 
-
-def lerp_color(start: str, end: str, t: float) -> str:
+def lerp_color(start, end, t):
     t = max(0.0, min(1.0, t))
     s = [int(start[i : i + 2], 16) for i in (1, 3, 5)]
     e = [int(end[i : i + 2], 16) for i in (1, 3, 5)]
     rgb = [round(sv + (ev - sv) * t) for sv, ev in zip(s, e)]
     return "#" + "".join(f"{value:02x}" for value in rgb)
 
-
-def axis_max(values: Sequence[float], minimum: float = 0.4) -> float:
+def axis_max(values, minimum=0.4):
     upper = max(values) if values else minimum
     return min(1.0, max(minimum, math.ceil((upper + 0.05) * 10) / 10))
 
-
-def per_class_metric_value(run: RunMetrics, label: str, metric_key: str) -> float:
+def per_class_metric_value(run, label, metric_key):
     if metric_key == "f1":
         return run.normalized_per_class_f1[label]
     if metric_key == "accuracy":
@@ -353,12 +316,12 @@ def per_class_metric_value(run: RunMetrics, label: str, metric_key: str) -> floa
         return run.normalized_per_class_recall[label]
     raise ValueError(f"Unsupported per-class metric: {metric_key}")
 
-
 class SvgCanvas:
-    def __init__(self, width: int, height: int, background: str = "#fffdf7"):
+
+    def __init__(self, width, height, background="#fffdf7"):
         self.width = width
         self.height = height
-        self.parts: List[str] = [
+        self.parts = [
             f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" '
             f'viewBox="0 0 {width} {height}" fill="none">',
             f'<rect width="{width}" height="{height}" fill="{background}" rx="24"/>',
@@ -375,20 +338,20 @@ class SvgCanvas:
             "</style>",
         ]
 
-    def add(self, snippet: str) -> None:
+    def add(self, snippet):
         self.parts.append(snippet)
 
     def text(
         self,
-        x: float,
-        y: float,
-        content: str,
+        x,
+        y,
+        content,
         *,
-        css_class: str = "",
-        anchor: str = "start",
-        weight: str | None = None,
-        fill: str | None = None,
-    ) -> None:
+        css_class="",
+        anchor="start",
+        weight=None,
+        fill=None,
+    ):
         attrs = [f'x="{x}"', f'y="{y}"', f'text-anchor="{anchor}"']
         if css_class:
             attrs.append(f'class="{css_class}"')
@@ -400,16 +363,16 @@ class SvgCanvas:
 
     def text_lines(
         self,
-        x: float,
-        y: float,
-        lines: Sequence[str],
+        x,
+        y,
+        lines,
         *,
-        css_class: str = "",
-        anchor: str = "start",
-        weight: str | None = None,
-        fill: str | None = None,
-        line_height: float = 16,
-    ) -> None:
+        css_class="",
+        anchor="start",
+        weight=None,
+        fill=None,
+        line_height=16,
+    ):
         attrs = [f'x="{x}"', f'y="{y}"', f'text-anchor="{anchor}"']
         if css_class:
             attrs.append(f'class="{css_class}"')
@@ -425,41 +388,39 @@ class SvgCanvas:
 
     def rect(
         self,
-        x: float,
-        y: float,
-        width: float,
-        height: float,
+        x,
+        y,
+        width,
+        height,
         *,
-        fill: str,
-        rx: float = 0,
-        stroke: str | None = None,
-    ) -> None:
+        fill,
+        rx=0,
+        stroke=None,
+    ):
         stroke_attr = f' stroke="{stroke}" stroke-width="1"' if stroke else ""
         self.add(
             f'<rect x="{x}" y="{y}" width="{width}" height="{height}" rx="{rx}" '
             f'fill="{fill}"{stroke_attr}/>'
         )
 
-    def line(self, x1: float, y1: float, x2: float, y2: float, *, css_class: str = "grid") -> None:
+    def line(self, x1, y1, x2, y2, *, css_class="grid"):
         self.add(f'<line x1="{x1}" y1="{y1}" x2="{x2}" y2="{y2}" class="{css_class}"/>')
 
-    def finish(self) -> str:
+    def finish(self):
         return "\n".join(self.parts + ["</svg>"])
 
-
-def write_svg(path: Path, canvas: SvgCanvas) -> None:
+def write_svg(path, canvas):
     path.write_text(canvas.finish(), encoding="utf-8")
 
-
 def draw_axis_grid(
-    canvas: SvgCanvas,
+    canvas,
     *,
-    chart_x: float,
-    chart_y: float,
-    chart_width: float,
-    chart_height: float,
-    ymax: float,
-) -> None:
+    chart_x,
+    chart_y,
+    chart_width,
+    chart_height,
+    ymax,
+):
     tick_step = 0.1
     num_ticks = int(round(ymax / tick_step))
     for tick in range(num_ticks + 1):
@@ -475,15 +436,14 @@ def draw_axis_grid(
         css_class="axis",
     )
 
-
 def render_metric_chart(
-    runs: Sequence[RunMetrics],
-    out_path: Path,
+    runs,
+    out_path,
     *,
-    metric_key: str,
-    title: str,
-    subtitle: str,
-) -> None:
+    metric_key,
+    title,
+    subtitle,
+):
     run_count = len(runs)
     width = 980 + max(0, run_count - 4) * 180
     height = 740
@@ -555,15 +515,14 @@ def render_metric_chart(
 
     write_svg(out_path, canvas)
 
-
 def render_per_class_chart(
-    runs: Sequence[RunMetrics],
-    out_path: Path,
+    runs,
+    out_path,
     *,
-    title: str,
-    subtitle: str,
-    values_by_run: str,
-) -> None:
+    title,
+    subtitle,
+    values_by_run,
+):
     run_count = len(runs)
     width = 1120 + max(0, run_count - 4) * 160
     height = 820
@@ -627,8 +586,7 @@ def render_per_class_chart(
 
     write_svg(out_path, canvas)
 
-
-def render_confusion_chart(run: RunMetrics, out_path: Path) -> None:
+def render_confusion_chart(run, out_path):
     width, height = 860, 780
     canvas = SvgCanvas(width, height)
     canvas.text(60, 66, f"{run.display_name} Confusion Matrix", css_class="title")
@@ -703,8 +661,7 @@ def render_confusion_chart(run: RunMetrics, out_path: Path) -> None:
 
     write_svg(out_path, canvas)
 
-
-def render_normalization_outcomes(runs: Sequence[RunMetrics], out_path: Path) -> None:
+def render_normalization_outcomes(runs, out_path):
     run_count = len(runs)
     width = 1120
     total_height = (52 + 48) * run_count - 48
@@ -788,16 +745,14 @@ def render_normalization_outcomes(runs: Sequence[RunMetrics], out_path: Path) ->
     canvas.text(1060, legend_base_y + 32, "Right-side label = net accuracy change", css_class="small muted", anchor="end")
     write_svg(out_path, canvas)
 
-
-def cleanup_previous_outputs(out_dir: Path, chart_dir: Path) -> None:
+def cleanup_previous_outputs(out_dir, chart_dir):
     report_path = out_dir / "README.md"
     if report_path.exists():
         report_path.unlink()
     for chart_path in chart_dir.glob("*.svg"):
         chart_path.unlink()
 
-
-def main() -> None:
+def main():
     base_dir = repo_root()
     out_dir = ensure_dir(base_dir / "results_report")
     chart_dir = ensure_dir(out_dir / "charts")
@@ -850,7 +805,6 @@ def main() -> None:
 
     for chart in sorted(chart_dir.glob("*.svg")):
         print(f"Wrote chart {chart}")
-
 
 if __name__ == "__main__":
     main()

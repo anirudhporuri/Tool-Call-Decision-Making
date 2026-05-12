@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-from __future__ import annotations
 
 import argparse
 import json
@@ -9,9 +8,8 @@ import pickle
 import random
 import subprocess
 import sys
-from dataclasses import asdict, dataclass
+from collections import namedtuple
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Sequence
 
 import numpy as np
 import torch
@@ -26,17 +24,15 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
 try:
     from huggingface_hub import snapshot_download
-except ImportError:  # pragma: no cover - surfaced at runtime in the probe env.
+except ImportError:
     snapshot_download = None
-
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PROMPTING_BASELINES_DIR = REPO_ROOT / "Prompting Baselines"
 if str(PROMPTING_BASELINES_DIR) not in sys.path:
     sys.path.insert(0, str(PROMPTING_BASELINES_DIR))
 
-from w2c_prompts import build_prompt  # noqa: E402
-
+from w2c_prompts import build_prompt
 
 DEFAULT_DATASET_DIR = REPO_ROOT / "local_datasets"
 DEFAULT_MODEL_CACHE_DIR = REPO_ROOT / "cluster_cache" / "model_cache"
@@ -64,35 +60,19 @@ TOKENIZER_FILE_HINTS = {
     "merges.txt",
 }
 
+ProbeExample = namedtuple("ProbeExample", "example_id question tools label metadata")
+LayerSpec = namedtuple("LayerSpec", "tag transformer_layer hidden_state_index")
 
-@dataclass
-class ProbeExample:
-    example_id: str
-    question: str
-    tools: Any
-    label: str
-    metadata: Dict[str, Any]
-
-
-@dataclass(frozen=True)
-class LayerSpec:
-    tag: str
-    transformer_layer: int
-    hidden_state_index: int
-
-
-def log(message: str) -> None:
+def log(message):
     print(message, flush=True)
 
-
-def env_flag(name: str, default: bool) -> bool:
+def env_flag(name, default):
     value = os.getenv(name)
     if value is None:
         return default
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
-
-def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
+def parse_args(argv=None):
     parser = argparse.ArgumentParser(
         description="Extract hidden states, train a linear probe, and compare it to saved When2Call MCQ outputs.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
@@ -183,26 +163,22 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         parser.error("--fewshot_json is required when --num_shots > 0.")
     return args
 
-
-def ensure_dir(path: str | Path) -> Path:
+def ensure_dir(path):
     directory = Path(path)
     directory.mkdir(parents=True, exist_ok=True)
     return directory
 
-
-def save_json(path: str | Path, payload: Dict[str, Any]) -> None:
+def save_json(path, payload):
     with open(path, "w", encoding="utf-8") as handle:
         json.dump(payload, handle, indent=2)
 
-
-def write_jsonl(path: str | Path, rows: Iterable[Dict[str, Any]]) -> None:
+def write_jsonl(path, rows):
     with open(path, "w", encoding="utf-8") as handle:
         for row in rows:
             handle.write(json.dumps(row, ensure_ascii=False) + "\n")
 
-
-def read_jsonl(path: str | Path) -> List[Dict[str, Any]]:
-    rows: List[Dict[str, Any]] = []
+def read_jsonl(path):
+    rows = []
     with open(path, "r", encoding="utf-8") as handle:
         for line in handle:
             line = line.strip()
@@ -210,12 +186,10 @@ def read_jsonl(path: str | Path) -> List[Dict[str, Any]]:
                 rows.append(json.loads(line))
     return rows
 
-
-def safe_dataset_slug(*parts: str) -> str:
+def safe_dataset_slug(*parts):
     return "__".join(part.replace("/", "__") for part in parts if part)
 
-
-def sanitize_model_name(model_name_or_path: str) -> str:
+def sanitize_model_name(model_name_or_path):
     return (
         model_name_or_path.strip()
         .replace("/", "__")
@@ -224,15 +198,13 @@ def sanitize_model_name(model_name_or_path: str) -> str:
         .replace(" ", "_")
     )
 
-
-def sanitized_args_dict(args: argparse.Namespace) -> Dict[str, Any]:
+def sanitized_args_dict(args):
     payload = vars(args).copy()
     if payload.get("hf_token"):
         payload["hf_token"] = "[REDACTED]"
     return payload
 
-
-def load_fewshot_examples(path: Optional[str], num_shots: int) -> List[Dict[str, Any]]:
+def load_fewshot_examples(path, num_shots):
     if num_shots == 0:
         return []
     if not path:
@@ -250,16 +222,14 @@ def load_fewshot_examples(path: Optional[str], num_shots: int) -> List[Dict[str,
             raise ValueError(f"Few-shot example {index} is missing required fields: {sorted(missing)}")
     return data[:num_shots]
 
-
-def get_dtype(dtype_name: str) -> torch.dtype:
+def get_dtype(dtype_name):
     return {
         "float16": torch.float16,
         "bfloat16": torch.bfloat16,
         "float32": torch.float32,
     }[dtype_name]
 
-
-def local_or_cached_model_path(model_name_or_path: str, cache_root: Path, hf_token: Optional[str]) -> str:
+def local_or_cached_model_path(model_name_or_path, cache_root, hf_token):
     candidate = Path(model_name_or_path).expanduser()
     if candidate.exists():
         resolved = str(candidate.resolve())
@@ -290,8 +260,7 @@ def local_or_cached_model_path(model_name_or_path: str, cache_root: Path, hf_tok
     )
     return str(local_dir.resolve())
 
-
-def load_eval_dataset(args: argparse.Namespace):
+def load_eval_dataset(args):
     if not args.dataset_dir:
         return load_dataset(args.dataset_name, args.dataset_config)[args.dataset_split]
 
@@ -311,8 +280,7 @@ def load_eval_dataset(args: argparse.Namespace):
 
     return dataset_obj[args.dataset_split]
 
-
-def ensure_probe_inputs(args: argparse.Namespace) -> None:
+def ensure_probe_inputs(args):
     eval_samples_path = Path(args.eval_samples_jsonl)
     if not eval_samples_path.exists():
         raise FileNotFoundError(
@@ -372,12 +340,10 @@ def ensure_probe_inputs(args: argparse.Namespace) -> None:
         "Either create them first or point --train_source_jsonls at existing files."
     )
 
-
-def is_peft_adapter_checkpoint(path: str | Path) -> bool:
+def is_peft_adapter_checkpoint(path):
     return (Path(path) / "adapter_config.json").is_file()
 
-
-def has_local_tokenizer_files(path: str | Path) -> bool:
+def has_local_tokenizer_files(path):
     candidate = Path(path)
     if not candidate.exists() or not candidate.is_dir():
         return False
@@ -390,12 +356,11 @@ def has_local_tokenizer_files(path: str | Path) -> bool:
         return True
     return (candidate / "vocab.json").exists() and (candidate / "merges.txt").exists()
 
-
 def resolve_peft_base_model_source(
-    model_name_or_path: str,
-    hf_token: Optional[str],
-    override: Optional[str] = None,
-) -> str:
+    model_name_or_path,
+    hf_token,
+    override=None,
+):
     if override:
         return override
 
@@ -408,12 +373,11 @@ def resolve_peft_base_model_source(
     peft_config = PeftConfig.from_pretrained(model_name_or_path, token=hf_token)
     return peft_config.base_model_name_or_path
 
-
 def resolve_tokenizer_source(
-    model_name_or_path: str,
-    hf_token: Optional[str],
-    peft_base_model_override: Optional[str] = None,
-) -> str:
+    model_name_or_path,
+    hf_token,
+    peft_base_model_override=None,
+):
     if peft_base_model_override:
         return peft_base_model_override
 
@@ -430,8 +394,7 @@ def resolve_tokenizer_source(
         override=peft_base_model_override,
     )
 
-
-def build_quant_config(dtype_name: str) -> BitsAndBytesConfig:
+def build_quant_config(dtype_name):
     compute_dtype = get_dtype(dtype_name)
     return BitsAndBytesConfig(
         load_in_4bit=True,
@@ -440,8 +403,7 @@ def build_quant_config(dtype_name: str) -> BitsAndBytesConfig:
         bnb_4bit_quant_type="nf4",
     )
 
-
-def load_tokenizer_and_model(args: argparse.Namespace):
+def load_tokenizer_and_model(args):
     tokenizer_source = resolve_tokenizer_source(
         args.model_name_or_path,
         args.hf_token,
@@ -454,11 +416,9 @@ def load_tokenizer_and_model(args: argparse.Namespace):
     )
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
-    # Probe extraction uses the final prompt token as the representation target, so
-    # if we must truncate, preserve the end of the prompt (current question + answer slot).
     tokenizer.truncation_side = "left"
 
-    model_kwargs: Dict[str, Any] = {
+    model_kwargs = {
         "token": args.hf_token,
         "device_map": args.device_map,
         "trust_remote_code": args.trust_remote_code,
@@ -497,8 +457,7 @@ def load_tokenizer_and_model(args: argparse.Namespace):
     model.eval()
     return tokenizer, model
 
-
-def infer_num_hidden_layers_from_config(config: Any) -> int:
+def infer_num_hidden_layers_from_config(config):
     if config is None:
         return 0
 
@@ -533,8 +492,7 @@ def infer_num_hidden_layers_from_config(config: Any) -> int:
 
     return 0
 
-
-def resolve_layer_specs(model: AutoModelForCausalLM) -> List[LayerSpec]:
+def resolve_layer_specs(model):
     num_hidden_layers = infer_num_hidden_layers_from_config(getattr(model, "config", None))
     if num_hidden_layers <= 0:
         if hasattr(model, "get_base_model"):
@@ -556,7 +514,7 @@ def resolve_layer_specs(model: AutoModelForCausalLM) -> List[LayerSpec]:
         ("last", num_hidden_layers),
     ]
 
-    resolved_specs: List[LayerSpec] = []
+    resolved_specs = []
     seen_layers = set()
     for tag, transformer_layer in requested_layers:
         transformer_layer = min(num_hidden_layers, max(1, transformer_layer))
@@ -572,18 +530,15 @@ def resolve_layer_specs(model: AutoModelForCausalLM) -> List[LayerSpec]:
         seen_layers.add(transformer_layer)
     return resolved_specs
 
+def same_layer_specs(left, right):
+    return [spec._asdict() for spec in left] == [spec._asdict() for spec in right]
 
-def same_layer_specs(left: Sequence[LayerSpec], right: Sequence[LayerSpec]) -> bool:
-    return [asdict(spec) for spec in left] == [asdict(spec) for spec in right]
-
-
-def source_prompt_messages(messages: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def source_prompt_messages(messages):
     if messages and messages[-1].get("role") == "assistant":
         return list(messages[:-1])
     return list(messages)
 
-
-def question_from_messages(messages: Sequence[Dict[str, Any]]) -> str:
+def question_from_messages(messages):
     if len(messages) == 1 and messages[0].get("role") == "user":
         return str(messages[0].get("content", "")).strip()
     rendered_turns = []
@@ -593,17 +548,16 @@ def question_from_messages(messages: Sequence[Dict[str, Any]]) -> str:
         rendered_turns.append(f"{role}: {content}")
     return "\n".join(rendered_turns).strip()
 
-
 def balanced_cap_examples(
-    examples: Sequence[ProbeExample],
-    max_examples: Optional[int],
+    examples,
+    max_examples,
     *,
-    seed: int,
-) -> List[ProbeExample]:
+    seed,
+):
     if max_examples is None or max_examples >= len(examples):
         return list(examples)
 
-    grouped: Dict[str, List[ProbeExample]] = {label: [] for label in PROBE_LABELS}
+    grouped = {label: [] for label in PROBE_LABELS}
     for example in examples:
         grouped[example.label].append(example)
 
@@ -613,7 +567,7 @@ def balanced_cap_examples(
 
     base_take = max_examples // len(PROBE_LABELS)
     remainder = max_examples % len(PROBE_LABELS)
-    capped: List[ProbeExample] = []
+    capped = []
 
     for label_index, label in enumerate(PROBE_LABELS):
         target_count = base_take + (1 if label_index < remainder else 0)
@@ -622,9 +576,8 @@ def balanced_cap_examples(
     rng.shuffle(capped)
     return capped
 
-
-def load_probe_train_examples(args: argparse.Namespace) -> List[ProbeExample]:
-    examples: List[ProbeExample] = []
+def load_probe_train_examples(args):
+    examples = []
     for source_path_text in args.train_source_jsonls:
         source_path = Path(source_path_text)
         with source_path.open("r", encoding="utf-8") as handle:
@@ -655,10 +608,9 @@ def load_probe_train_examples(args: argparse.Namespace) -> List[ProbeExample]:
                 )
     return balanced_cap_examples(examples, args.max_train_examples, seed=args.random_seed)
 
-
-def load_probe_test_examples(args: argparse.Namespace) -> List[ProbeExample]:
+def load_probe_test_examples(args):
     dataset = load_eval_dataset(args)
-    examples: List[ProbeExample] = []
+    examples = []
     start_index = max(0, args.start_index)
     for dataset_index in range(start_index, len(dataset)):
         if args.max_test_examples is not None and len(examples) >= args.max_test_examples:
@@ -686,24 +638,23 @@ def load_probe_test_examples(args: argparse.Namespace) -> List[ProbeExample]:
         )
     return examples
 
-
 def extract_features(
     *,
-    examples: Sequence[ProbeExample],
-    tokenizer: AutoTokenizer,
-    model: AutoModelForCausalLM,
-    layer_specs: Sequence[LayerSpec],
-    args: argparse.Namespace,
-    fewshot_examples: Sequence[Dict[str, Any]],
-    split_name: str,
-) -> tuple[np.ndarray, np.ndarray, List[Dict[str, Any]]]:
+    examples,
+    tokenizer,
+    model,
+    layer_specs,
+    args,
+    fewshot_examples,
+    split_name,
+):
     if not examples:
         raise ValueError(f"No {split_name} examples available for probe extraction.")
 
     model_device = next(model.parameters()).device
-    feature_batches: List[np.ndarray] = []
-    label_batches: List[np.ndarray] = []
-    metadata_rows: List[Dict[str, Any]] = []
+    feature_batches = []
+    label_batches = []
+    metadata_rows = []
     num_truncated_prompts = 0
 
     for start in tqdm(range(0, len(examples), args.batch_size), desc=f"Extracting {split_name} features"):
@@ -744,7 +695,7 @@ def extract_features(
 
         attention_mask = encoded["attention_mask"]
         last_prompt_token_indices = attention_mask.sum(dim=1) - 1
-        layer_feature_slices: List[np.ndarray] = []
+        layer_feature_slices = []
         for layer_spec in layer_specs:
             layer_hidden = outputs.hidden_states[layer_spec.hidden_state_index]
             row_indices = torch.arange(layer_hidden.size(0), device=layer_hidden.device)
@@ -788,16 +739,15 @@ def extract_features(
         )
     return features, labels, metadata_rows
 
-
 def save_feature_artifacts(
     *,
-    feature_path: Path,
-    metadata_path: Path,
-    features: np.ndarray,
-    labels: np.ndarray,
-    metadata_rows: Sequence[Dict[str, Any]],
-    layer_specs: Sequence[LayerSpec],
-) -> None:
+    feature_path,
+    metadata_path,
+    features,
+    labels,
+    metadata_rows,
+    layer_specs,
+):
     np.savez_compressed(
         feature_path,
         X=features,
@@ -809,11 +759,10 @@ def save_feature_artifacts(
     )
     write_jsonl(metadata_path, metadata_rows)
 
-
 def load_feature_artifacts(
-    feature_path: Path,
-    metadata_path: Path,
-) -> tuple[np.ndarray, np.ndarray, List[Dict[str, Any]], List[LayerSpec]]:
+    feature_path,
+    metadata_path,
+):
     with np.load(feature_path, allow_pickle=False) as payload:
         features = payload["X"]
         labels = payload["y"]
@@ -841,14 +790,13 @@ def load_feature_artifacts(
     ]
     return features, labels, metadata_rows, layer_specs
 
-
 def compute_metrics(
-    y_true: Sequence[Any],
-    y_pred: Sequence[Any],
+    y_true,
+    y_pred,
     *,
-    labels: Sequence[Any],
-    target_names: Sequence[str],
-) -> Dict[str, Any]:
+    labels,
+    target_names,
+):
     return {
         "accuracy": float(accuracy_score(y_true, y_pred)),
         "macro_f1": float(f1_score(y_true, y_pred, labels=list(labels), average="macro", zero_division=0)),
@@ -864,13 +812,12 @@ def compute_metrics(
         ),
     }
 
-
 def train_probe_for_single_layer(
     *,
-    train_features: np.ndarray,
-    train_labels: np.ndarray,
-    args: argparse.Namespace,
-) -> tuple[Pipeline, Dict[str, Any]]:
+    train_features,
+    train_labels,
+    args,
+):
     X_train, X_dev, y_train, y_dev = train_test_split(
         train_features,
         train_labels,
@@ -879,9 +826,9 @@ def train_probe_for_single_layer(
         random_state=args.random_seed,
     )
 
-    dev_results: List[Dict[str, Any]] = []
-    best_pipeline: Optional[Pipeline] = None
-    best_result: Optional[Dict[str, Any]] = None
+    dev_results = []
+    best_pipeline = None
+    best_result = None
 
     for c_value in args.c_values:
         pipeline = Pipeline(
@@ -941,16 +888,15 @@ def train_probe_for_single_layer(
     }
     return final_pipeline, training_summary
 
-
 def train_probe_suite(
     *,
-    train_features: np.ndarray,
-    train_labels: np.ndarray,
-    layer_specs: Sequence[LayerSpec],
-    args: argparse.Namespace,
-) -> tuple[Dict[str, Pipeline], Dict[str, Any]]:
-    probe_pipelines: Dict[str, Pipeline] = {}
-    layer_summaries: Dict[str, Any] = {}
+    train_features,
+    train_labels,
+    layer_specs,
+    args,
+):
+    probe_pipelines = {}
+    layer_summaries = {}
 
     for layer_index, layer_spec in enumerate(layer_specs):
         pipeline, summary = train_probe_for_single_layer(
@@ -967,14 +913,13 @@ def train_probe_suite(
 
     training_summary = {
         "label_names": list(PROBE_LABELS),
-        "layer_specs": [asdict(spec) for spec in layer_specs],
+        "layer_specs": [spec._asdict() for spec in layer_specs],
         "layers": layer_summaries,
     }
     return probe_pipelines, training_summary
 
-
-def load_eval_samples(path: Path) -> Dict[str, Dict[str, Any]]:
-    rows_by_uuid: Dict[str, Dict[str, Any]] = {}
+def load_eval_samples(path):
+    rows_by_uuid = {}
     with path.open("r", encoding="utf-8") as handle:
         for line in handle:
             line = line.strip()
@@ -984,17 +929,16 @@ def load_eval_samples(path: Path) -> Dict[str, Dict[str, Any]]:
             rows_by_uuid[row["uuid"]] = row
     return rows_by_uuid
 
-
 def compare_probe_to_eval(
     *,
-    test_metadata: Sequence[Dict[str, Any]],
-    probe_predictions_by_layer: Dict[str, np.ndarray],
-    probe_probabilities_by_layer: Dict[str, np.ndarray],
-    eval_samples_path: Path,
-    layer_specs: Sequence[LayerSpec],
-) -> tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    test_metadata,
+    probe_predictions_by_layer,
+    probe_probabilities_by_layer,
+    eval_samples_path,
+    layer_specs,
+):
     eval_rows = load_eval_samples(eval_samples_path)
-    combined_rows: List[Dict[str, Any]] = []
+    combined_rows = []
     missing_eval_rows = 0
     gold_mismatches = 0
 
@@ -1061,7 +1005,7 @@ def compare_probe_to_eval(
             labels=PROBE_LABELS,
             target_names=PROBE_LABELS,
         ),
-        "layer_specs": [asdict(spec) for spec in layer_specs],
+        "layer_specs": [spec._asdict() for spec in layer_specs],
         "layers": {},
     }
 
@@ -1116,8 +1060,7 @@ def compare_probe_to_eval(
 
     return combined_rows, summary
 
-
-def main(argv: Optional[Sequence[str]] = None) -> None:
+def main(argv=None):
     args = parse_args(argv)
     output_dir = ensure_dir(args.output_dir)
     model_cache_dir = ensure_dir(args.model_cache_dir)
@@ -1149,7 +1092,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
 
     tokenizer = None
     model = None
-    layer_specs: List[LayerSpec] = []
+    layer_specs = []
 
     need_train_extraction = not (args.reuse_features and train_feature_path.exists() and train_metadata_path.exists())
     need_test_extraction = not (args.reuse_features and test_feature_path.exists() and test_metadata_path.exists())
@@ -1263,7 +1206,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             {
                 "pipelines": probe_pipelines,
                 "label_names": PROBE_LABELS,
-                "layer_specs": [asdict(spec) for spec in layer_specs],
+                "layer_specs": [spec._asdict() for spec in layer_specs],
             },
             handle,
         )
@@ -1294,7 +1237,6 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     log(f"Training summary: {training_summary_path}")
     log(f"Evaluation summary: {evaluation_summary_path}")
     log(f"Joined comparison rows: {comparison_jsonl_path}")
-
 
 if __name__ == "__main__":
     main()

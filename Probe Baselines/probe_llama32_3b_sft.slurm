@@ -17,7 +17,6 @@ VENV_DIR="${REPO_ROOT}/.venv"
 LLAMA_BASE_MODEL_DIR="${REPO_ROOT}/cluster_cache/model_cache/meta-llama__Llama-3.2-3B-Instruct"
 
 echo "Activating virtualenv at ${VENV_DIR}"
-# shellcheck disable=SC1091
 source "${VENV_DIR}/bin/activate"
 
 OUTPUT_DIR="${REPO_ROOT}/Probe Baselines/outputs/llama32_3b_sft_probe"

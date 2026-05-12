@@ -1,21 +1,16 @@
-from __future__ import annotations
-
 import argparse
-from typing import Any, Dict, List, Optional, Sequence
 
 from cai_stage_utils import (
-    env_flag,
+    add_run_mode_args,
+    count_values,
     env_int,
-    load_selected_source_rows,
     ordered_stage_rows,
-    resolve_max_examples,
-    should_enforce_strict_balance,
-    source_balance,
+    parse_stage_args,
+    prepare_stage_source,
 )
 from cai_utils import count_label_values, ensure_dir, load_jsonl, save_json, write_jsonl
 
-
-def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
+def parse_args(argv=None):
     parser = argparse.ArgumentParser(
         description="Build the final CAI SFT dataset from initial outputs, critiques, and revisions.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
@@ -27,42 +22,27 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("revisions_file")
     parser.add_argument("--start-index", type=int, default=0)
     parser.add_argument("--max-examples", type=int, default=env_int("MAX_EXAMPLES", None))
-    parser.add_argument("--dry-run", action="store_true", default=env_flag("DRY_RUN", False))
-    parser.add_argument("--smoke-run", action="store_true", default=env_flag("SMOKE_RUN", False))
-    parser.add_argument("--dry-run-max-examples", type=int, default=env_int("DRY_RUN_MAX_EXAMPLES", 8))
-    parser.add_argument("--smoke-run-max-examples", type=int, default=env_int("SMOKE_RUN_MAX_EXAMPLES", 6))
-    args = parser.parse_args(argv)
-    if args.dry_run and args.smoke_run:
-        parser.error("--dry-run and --smoke-run are mutually exclusive.")
-    return args
+    add_run_mode_args(parser)
+    return parse_stage_args(parser, argv)
 
-
-def summarize_records(records: List[Dict[str, Any]]) -> Dict[str, Any]:
-    exported_counts: Dict[str, int] = {}
-    empty_revised_rows = 0
-    revised_structural_kind_counts: Dict[str, int] = {}
-    revised_valid_counts: Dict[str, int] = {}
-    for record in records:
-        label = record["chosen_behavior_class"]
-        revised_kind = record.get("revised_output_structural_kind")
-        if revised_kind:
-            revised_structural_kind_counts[revised_kind] = revised_structural_kind_counts.get(revised_kind, 0) + 1
-        revised_valid_key = "valid" if record.get("revised_output_valid") else "invalid"
-        revised_valid_counts[revised_valid_key] = revised_valid_counts.get(revised_valid_key, 0) + 1
-        if record.get("selected_response"):
-            exported_counts[label] = exported_counts.get(label, 0) + 1
-        else:
-            empty_revised_rows += 1
+def summarize_records(records):
     return {
-        "exported_counts": exported_counts,
-        "empty_revised_rows": empty_revised_rows,
-        "revised_structural_kind_counts": revised_structural_kind_counts,
-        "revised_valid_counts": revised_valid_counts,
+        "exported_counts": count_values(
+            record["chosen_behavior_class"] for record in records if record.get("selected_response")
+        ),
+        "empty_revised_rows": sum(not record.get("selected_response") for record in records),
+        "revised_structural_kind_counts": count_values(
+            record["revised_output_structural_kind"]
+            for record in records
+            if record.get("revised_output_structural_kind")
+        ),
+        "revised_valid_counts": count_values(
+            "valid" if record.get("revised_output_valid") else "invalid" for record in records
+        ),
     }
 
-
-def export_rows(records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    rows: List[Dict[str, Any]] = []
+def export_rows(records):
+    rows = []
     for record in records:
         if not record["selected_response"]:
             continue
@@ -77,29 +57,16 @@ def export_rows(records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         )
     return rows
 
-
-def main(argv: Optional[Sequence[str]] = None) -> None:
+def main(argv=None):
     args = parse_args(argv)
     out_dir = ensure_dir(args.output_dir)
     save_json(out_dir / "run_config.json", vars(args))
 
-    max_examples = resolve_max_examples(args)
-    strict_balance = should_enforce_strict_balance(
-        dry_run=args.dry_run,
-        smoke_run=args.smoke_run,
-        start_index=args.start_index,
-        max_examples=max_examples,
-    )
-    source_rows = load_selected_source_rows(
-        source_file=args.source_file,
-        start_index=args.start_index,
-        max_examples=max_examples,
-        smoke_run=args.smoke_run and args.max_examples is None,
-    )
+    source = prepare_stage_source(args, enforce_strict_balance=True)
+    source_rows = source.rows
     initial_rows = ordered_stage_rows(source_rows, load_jsonl(args.initial_outputs_file), "initial_outputs")
     critique_rows = ordered_stage_rows(source_rows, load_jsonl(args.critiques_file), "critiques")
     revision_rows = ordered_stage_rows(source_rows, load_jsonl(args.revisions_file), "revisions")
-    selected_balance = source_balance(source_rows, strict_balance)
 
     if args.dry_run:
         save_json(
@@ -107,12 +74,12 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             {
                 "mode": "dry_run",
                 "source_examples": len(source_rows),
-                "source_balance": selected_balance,
+                "source_balance": source.balance,
             },
         )
         return
 
-    master_records: List[Dict[str, Any]] = []
+    master_records = []
     for source_row, initial_row, critique_row, revision_row in zip(source_rows, initial_rows, critique_rows, revision_rows):
         selected_source = "revision"
         selection_reason = "used_revision_directly"
@@ -173,8 +140,8 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             "critiques_file": args.critiques_file,
             "revisions_file": args.revisions_file,
             "source_examples": len(source_rows),
-            "source_balance": selected_balance,
-            "strict_balance_enforced": strict_balance,
+            "source_balance": source.balance,
+            "strict_balance_enforced": source.strict_balance,
             "outputs": {
                 "master_records": str(master_path),
                 "export_dataset": str(export_path),
@@ -186,11 +153,10 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     save_json(
         out_dir / "export_counts.json",
         {
-            "source_balance": selected_balance,
+            "source_balance": source.balance,
             "export_balance": count_label_values(export_dataset, "behavior_class") if export_dataset else {},
         },
     )
-
 
 if __name__ == "__main__":
     main()

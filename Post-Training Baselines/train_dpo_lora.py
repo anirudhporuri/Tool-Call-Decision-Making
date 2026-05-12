@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
-from __future__ import annotations
 
 import argparse
 import inspect
 import json
 from types import MethodType
 from pathlib import Path
-from typing import Any, Dict, List, Optional
 
 import torch
 from datasets import load_dataset, load_from_disk
@@ -14,8 +12,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
 from w2c_train_format import format_pref_example
 
-
-def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
+def parse_args(argv=None):
     p = argparse.ArgumentParser(description="Train LoRA DPO on When2Call train_pref.")
     p.add_argument("--model_name_or_path", type=str, required=True)
     p.add_argument("--model_family", type=str, choices=["llama", "gemma"], required=True)
@@ -67,36 +64,32 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     p.add_argument("--dry_run", action="store_true")
     return p.parse_args(argv)
 
-
-def ensure_dir(path: str | Path) -> Path:
+def ensure_dir(path):
     p = Path(path)
     p.mkdir(parents=True, exist_ok=True)
     return p
 
-
-def save_json(path: str | Path, payload: Dict[str, Any]) -> None:
+def save_json(path, payload):
     with open(path, "w", encoding="utf-8") as f:
         json.dump(payload, f, indent=2)
 
-
-def sanitized_args_dict(args: argparse.Namespace) -> Dict[str, Any]:
+def sanitized_args_dict(args):
     payload = vars(args).copy()
     if payload.get("hf_token"):
         payload["hf_token"] = "[REDACTED]"
     return payload
 
-
-def safe_dataset_slug(*parts: str) -> str:
+def safe_dataset_slug(*parts):
     return "__".join(part.replace("/", "__") for part in parts if part)
 
-
-def get_dtype(name: str) -> torch.dtype:
+def get_dtype(name):
     return {
         "float16": torch.float16,
         "bfloat16": torch.bfloat16,
         "float32": torch.float32,
     }[name]
-def load_source_dataset(args: argparse.Namespace):
+
+def load_source_dataset(args):
     cache_dir = None
     if args.dataset_dir:
         cache_dir = str(ensure_dir(Path(args.dataset_dir) / "_hf_cache"))
@@ -121,26 +114,22 @@ def load_source_dataset(args: argparse.Namespace):
             ds = load_dataset(args.dataset_name, args.dataset_config)[args.dataset_split]
     return ds
 
-
-def preprocess_row(row: Dict[str, Any], model_family: str) -> Dict[str, str]:
+def preprocess_row(row, model_family):
     prompt, chosen, rejected = format_pref_example(model_family=model_family, row=row)
     return {"prompt": prompt, "chosen": chosen, "rejected": rejected}
 
-
-def maybe_limit_dataset(dataset, limit: Optional[int]):
+def maybe_limit_dataset(dataset, limit):
     if dataset is None or limit is None:
         return dataset
     return dataset.select(range(min(limit, len(dataset))))
 
-
-def split_dataset(dataset, val_size: float, seed: int):
+def split_dataset(dataset, val_size, seed):
     if val_size <= 0:
         return dataset, None
     split = dataset.train_test_split(test_size=val_size, seed=seed, shuffle=True)
     return split["train"], split["test"]
 
-
-def format_dataset(dataset, model_family: str, desc: str):
+def format_dataset(dataset, model_family, desc):
     if dataset is None:
         return None
     return dataset.map(
@@ -149,8 +138,7 @@ def format_dataset(dataset, model_family: str, desc: str):
         desc=desc,
     )
 
-
-def build_quant_config(args: argparse.Namespace) -> Optional[BitsAndBytesConfig]:
+def build_quant_config(args):
     if not args.load_in_4bit:
         return None
     return BitsAndBytesConfig(
@@ -160,25 +148,22 @@ def build_quant_config(args: argparse.Namespace) -> Optional[BitsAndBytesConfig]
         bnb_4bit_use_double_quant=True,
     )
 
-
-def is_peft_adapter_checkpoint(path: str | Path) -> bool:
+def is_peft_adapter_checkpoint(path):
     return (Path(path) / "adapter_config.json").is_file()
 
-
-def save_preview(dataset, path: Path, n: int = 20) -> None:
+def save_preview(dataset, path, n=20):
     with open(path, "w", encoding="utf-8") as f:
         for i in range(min(n, len(dataset))):
             f.write(json.dumps(dataset[i], ensure_ascii=False) + "\n")
 
-
 def write_dry_run_summary(
     *,
-    out_dir: Path,
-    train_examples: int,
-    eval_examples: int,
-    train_preview_path: Path,
-    eval_preview_path: Optional[Path],
-) -> Dict[str, Any]:
+    out_dir,
+    train_examples,
+    eval_examples,
+    train_preview_path,
+    eval_preview_path,
+):
     summary = {
         "mode": "dry_run",
         "model_loaded": False,
@@ -198,13 +183,11 @@ def write_dry_run_summary(
         json.dump(summary, f, indent=2)
     return summary
 
-
-def supported_kwargs(callable_obj, kwargs: Dict[str, Any]) -> Dict[str, Any]:
+def supported_kwargs(callable_obj, kwargs):
     params = inspect.signature(callable_obj).parameters
     return {key: value for key, value in kwargs.items() if key in params}
 
-
-def add_zero_token_type_ids(result: Any) -> Any:
+def add_zero_token_type_ids(result):
     if "token_type_ids" in result or "input_ids" not in result:
         return result
 
@@ -220,8 +203,7 @@ def add_zero_token_type_ids(result: Any) -> Any:
             result["token_type_ids"] = [0 for _ in input_ids]
     return result
 
-
-def patch_gemma_tokenizer_for_training(tokenizer) -> None:
+def patch_gemma_tokenizer_for_training(tokenizer):
     tokenizer_cls = type(tokenizer)
     if getattr(tokenizer_cls, "_w2c_forces_token_type_ids", False):
         return
@@ -236,8 +218,7 @@ def patch_gemma_tokenizer_for_training(tokenizer) -> None:
     tokenizer_cls.__call__ = patched_call
     tokenizer_cls._w2c_forces_token_type_ids = True
 
-
-def patch_gemma_model_forward_for_training(model) -> None:
+def patch_gemma_model_forward_for_training(model):
     if getattr(model, "_w2c_injects_token_type_ids", False):
         return
 
@@ -251,8 +232,7 @@ def patch_gemma_model_forward_for_training(model) -> None:
     model.forward = MethodType(patched_forward, model)
     model._w2c_injects_token_type_ids = True
 
-
-def main(argv: Optional[List[str]] = None) -> None:
+def main(argv=None):
     args = parse_args(argv)
     out_dir = ensure_dir(args.output_dir)
 
@@ -402,7 +382,6 @@ def main(argv: Optional[List[str]] = None) -> None:
     if eval_ds is not None:
         eval_metrics = trainer.evaluate()
         save_json(out_dir / "eval_metrics.json", eval_metrics)
-
 
 if __name__ == "__main__":
     main()

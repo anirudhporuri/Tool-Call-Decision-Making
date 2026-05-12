@@ -10,11 +10,6 @@
 #SBATCH --mem=48g
 #SBATCH --gres=gpu:1
 
-# Submit with something like:
-# sbatch eval_class.slurm meta-llama/Llama-3.2-3B-Instruct llama 0 outputs/llama3_2_zeroshot
-# sbatch eval_class.slurm meta-llama/Llama-3.2-3B-Instruct llama 4 outputs/llama3_2_4shot fewshot_examples.json
-# sbatch eval_class.slurm google/gemma-3-4b-it gemma 4 outputs/gemma3_4b_4shot fewshot_examples.json
-
 set -euo pipefail
 mkdir -p logs
 
@@ -23,13 +18,6 @@ MODEL_FAMILY="${2:?arg2=model_family}"
 NUM_SHOTS="${3:?arg3=num_shots}"
 OUTPUT_DIR="${4:?arg4=output_dir}"
 FEWSHOT_JSON="${5:-}"
-
-# Activate your environment here.
-# Examples:
-# source ~/miniconda3/etc/profile.d/conda.sh
-# conda activate your-env
-# or
-# source ~/venvs/when2call/bin/activate
 
 cd "$(dirname "$0")"
 

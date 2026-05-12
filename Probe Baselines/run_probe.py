@@ -1,11 +1,8 @@
 #!/usr/bin/env python3
-from __future__ import annotations
 
 import argparse
 import os
 from pathlib import Path
-from typing import List, Optional, Sequence
-
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_DATASET_DIR = REPO_ROOT / "local_datasets"
@@ -15,20 +12,17 @@ DEFAULT_TRAIN_SOURCE_JSONLS = [
     REPO_ROOT / "CAI" / "generated_datasets" / "train_pref_cai_dpo_source.jsonl",
 ]
 
-
-def env_flag(name: str, default: bool) -> bool:
+def env_flag(name, default):
     value = os.getenv(name)
     if value is None:
         return default
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
-
-def env_int(name: str, default: Optional[int]) -> Optional[int]:
+def env_int(name, default):
     value = os.getenv(name)
     return int(value) if value is not None else default
 
-
-def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
+def parse_args(argv=None):
     parser = argparse.ArgumentParser(
         description="Friendly launcher for the When2Call hidden-state probe pipeline.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
@@ -83,8 +77,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         parser.error("--fewshot-json is required when --num-shots > 0.")
     return args
 
-
-def build_probe_argv(args: argparse.Namespace) -> List[str]:
+def build_probe_argv(args):
     forwarded = [
         "--model_name_or_path",
         args.model_name_or_path,
@@ -156,13 +149,11 @@ def build_probe_argv(args: argparse.Namespace) -> List[str]:
         forwarded.append("--prefetch_models")
     return forwarded
 
-
-def main(argv: Optional[Sequence[str]] = None) -> None:
+def main(argv=None):
     args = parse_args(argv)
     from w2c_probe import main as probe_main
 
     probe_main(build_probe_argv(args))
-
 
 if __name__ == "__main__":
     main()

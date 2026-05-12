@@ -1,11 +1,7 @@
-from __future__ import annotations
-
 import json
 import re
-from typing import Any, Dict, List, Optional
 
 ANSWER_ORDER = ["direct", "tool_call", "request_for_info", "cannot_answer"]
-
 
 LLAMA_SYSTEM = (
     "You are an expert in composing functions. You are given a question and a set of possible functions.\n"
@@ -31,8 +27,7 @@ GEMMA_USER_INSTRUCTIONS = (
 
 _TOOLCALL_RE = re.compile(r"<TOOLCALL>(.*?)</TOOLCALL>", re.DOTALL)
 
-
-def serialize_tools(tools: Any) -> str:
+def serialize_tools(tools):
     if isinstance(tools, str):
         return tools
     try:
@@ -40,22 +35,19 @@ def serialize_tools(tools: Any) -> str:
     except TypeError:
         return str(tools)
 
-
-def extract_toolcall_payload(text: str) -> Optional[str]:
+def extract_toolcall_payload(text):
     match = _TOOLCALL_RE.search(text)
     if not match:
         return None
     return match.group(1).strip()
 
-
-def _maybe_json_load(text: str) -> Any:
+def _maybe_json_load(text):
     try:
         return json.loads(text.strip())
     except Exception:
         return text
 
-
-def _python_literal(value: Any) -> str:
+def _python_literal(value):
     if isinstance(value, str):
         return repr(value)
     if isinstance(value, bool):
@@ -66,8 +58,7 @@ def _python_literal(value: Any) -> str:
         return str(value)
     return repr(value)
 
-
-def canonical_toolcall_to_llama(choice_text: str) -> str:
+def canonical_toolcall_to_llama(choice_text):
     payload = extract_toolcall_payload(choice_text) or choice_text.strip()
     parsed = _maybe_json_load(payload)
 
@@ -89,8 +80,7 @@ def canonical_toolcall_to_llama(choice_text: str) -> str:
         rendered_calls.append(f"{call['name']}({rendered_args})")
     return "[" + ", ".join(rendered_calls) + "]"
 
-
-def serialize_fewshot_answer(answer_text: str, model_family: str) -> str:
+def serialize_fewshot_answer(answer_text, model_family):
     payload = extract_toolcall_payload(answer_text)
     if payload is None:
         return answer_text.strip()
@@ -98,9 +88,8 @@ def serialize_fewshot_answer(answer_text: str, model_family: str) -> str:
         return canonical_toolcall_to_llama(answer_text)
     return payload
 
-
-def build_llama_prompt(question: str, tools: Any, fewshot_examples: List[Dict[str, Any]]) -> str:
-    parts: List[str] = [
+def build_llama_prompt(question, tools, fewshot_examples):
+    parts = [
         "<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n",
         LLAMA_SYSTEM,
         "<|eot_id|>\n",
@@ -132,8 +121,7 @@ def build_llama_prompt(question: str, tools: Any, fewshot_examples: List[Dict[st
     )
     return "".join(parts)
 
-
-def build_gemma_prompt(question: str, tools: Any, fewshot_examples: List[Dict[str, Any]]) -> str:
+def build_gemma_prompt(question, tools, fewshot_examples):
     parts = ["<start_of_turn>user\n", GEMMA_USER_INSTRUCTIONS]
 
     for i, example in enumerate(fewshot_examples, start=1):
@@ -161,14 +149,13 @@ def build_gemma_prompt(question: str, tools: Any, fewshot_examples: List[Dict[st
     )
     return "".join(parts)
 
-
 def build_prompt(
     *,
-    model_family: str,
-    question: str,
-    tools: Any,
-    fewshot_examples: Optional[List[Dict[str, Any]]] = None,
-) -> str:
+    model_family,
+    question,
+    tools,
+    fewshot_examples=None,
+):
     fewshot_examples = fewshot_examples or []
     model_family = model_family.lower()
     builders = {"llama": build_llama_prompt, "gemma": build_gemma_prompt}
@@ -176,8 +163,7 @@ def build_prompt(
         return builders[model_family](question, tools, fewshot_examples)
     raise ValueError(f"Unsupported model_family={model_family!r}. Use 'llama' or 'gemma'.")
 
-
-def convert_test_choice_for_model(choice_label: str, choice_text: str, model_family: str) -> str:
+def convert_test_choice_for_model(choice_label, choice_text, model_family):
     if choice_label != "tool_call":
         return choice_text.strip()
     model_family = model_family.lower()

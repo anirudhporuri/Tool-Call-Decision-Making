@@ -1,17 +1,16 @@
-from __future__ import annotations
-
 import argparse
 import os
-from typing import Any, Dict, List, Optional, Sequence
 
 from cai_stage_utils import (
     add_bool_flag,
+    add_run_mode_args,
+    count_values,
     env_flag,
     env_int,
     load_existing_stage_records,
-    load_selected_source_rows,
     ordered_stage_rows,
-    resolve_max_examples,
+    parse_stage_args,
+    prepare_stage_source,
     sanitized_args_dict,
 )
 from cai_utils import (
@@ -29,8 +28,7 @@ from cai_utils import (
     write_jsonl,
 )
 
-
-def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
+def parse_args(argv=None):
     parser = argparse.ArgumentParser(
         description="Generate CAI revisions from initial outputs and critiques.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
@@ -50,55 +48,33 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--max-new-tokens", type=int, default=env_int("REVISION_MAX_NEW_TOKENS", 256))
     parser.add_argument("--batch-size", type=int, default=env_int("BATCH_SIZE", 2))
     parser.add_argument("--max-prompt-length", type=int, default=env_int("MAX_PROMPT_LENGTH", 1024))
-    parser.add_argument("--dry-run", action="store_true", default=env_flag("DRY_RUN", False))
-    parser.add_argument("--smoke-run", action="store_true", default=env_flag("SMOKE_RUN", False))
-    parser.add_argument("--dry-run-max-examples", type=int, default=env_int("DRY_RUN_MAX_EXAMPLES", 8))
-    parser.add_argument("--smoke-run-max-examples", type=int, default=env_int("SMOKE_RUN_MAX_EXAMPLES", 6))
+    add_run_mode_args(parser)
     add_bool_flag(parser, "--load-in-4bit", env_flag("LOAD_IN_4BIT", True), "Load model in 4-bit.")
     add_bool_flag(parser, "--trust-remote-code", env_flag("TRUST_REMOTE_CODE", False), "Allow custom model code.")
-    args = parser.parse_args(argv)
-    if args.dry_run and args.smoke_run:
-        parser.error("--dry-run and --smoke-run are mutually exclusive.")
-    return args
+    return parse_stage_args(parser, argv)
 
-
-def summarize_records(records: List[Dict[str, Any]]) -> Dict[str, Any]:
-    class_counts: Dict[str, int] = {}
-    structural_kind_counts: Dict[str, int] = {}
-    used_original_without_generation = 0
-    invalid_reason_counts: Dict[str, int] = {}
-    for record in records:
-        revision_class = record["revised_output_class"]
-        structural_kind = record["revised_output_structural_kind"]
-        class_counts[revision_class] = class_counts.get(revision_class, 0) + 1
-        structural_kind_counts[structural_kind] = structural_kind_counts.get(structural_kind, 0) + 1
-        if record["revision_used_original_without_generation"]:
-            used_original_without_generation += 1
-        if not record["revised_output_valid"] and record["revised_output_validation_reason"]:
-            reason = record["revised_output_validation_reason"]
-            invalid_reason_counts[reason] = invalid_reason_counts.get(reason, 0) + 1
+def summarize_records(records):
     return {
-        "revision_class_counts": class_counts,
-        "structural_kind_counts": structural_kind_counts,
-        "used_original_without_generation_rows": used_original_without_generation,
-        "invalid_reason_counts": invalid_reason_counts,
+        "revision_class_counts": count_values(record["revised_output_class"] for record in records),
+        "structural_kind_counts": count_values(record["revised_output_structural_kind"] for record in records),
+        "used_original_without_generation_rows": sum(
+            bool(record["revision_used_original_without_generation"]) for record in records
+        ),
+        "invalid_reason_counts": count_values(
+            record["revised_output_validation_reason"]
+            for record in records
+            if not record["revised_output_valid"] and record["revised_output_validation_reason"]
+        ),
     }
 
-
-def main(argv: Optional[Sequence[str]] = None) -> None:
+def main(argv=None):
     args = parse_args(argv)
     if args.batch_size < 1:
         raise ValueError("--batch-size must be at least 1.")
     out_dir = ensure_dir(args.output_dir)
     save_json(out_dir / "run_config.json", sanitized_args_dict(args))
 
-    max_examples = resolve_max_examples(args)
-    source_rows = load_selected_source_rows(
-        source_file=args.source_file,
-        start_index=args.start_index,
-        max_examples=max_examples,
-        smoke_run=args.smoke_run and args.max_examples is None,
-    )
+    source_rows = prepare_stage_source(args).rows
     initial_rows = ordered_stage_rows(source_rows, load_jsonl(args.initial_outputs_file), "initial_outputs")
     critique_rows = ordered_stage_rows(source_rows, load_jsonl(args.critiques_file), "critiques")
     constitution = get_constitution()
@@ -161,7 +137,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             trust_remote_code=args.trust_remote_code,
         )
 
-        generation_tasks: List[Dict[str, Any]] = []
+        generation_tasks = []
         iterator = progress(
             remaining_indices,
             total=len(remaining_indices),
@@ -232,7 +208,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
                 seed=args.seed + task_batch[0]["source_row"]["source_row_index"],
                 max_prompt_length=args.max_prompt_length,
             )
-            batch_records: List[Dict[str, Any]] = []
+            batch_records = []
             for task, revision_raw in zip(task_batch, revision_outputs):
                 source_row = task["source_row"]
                 evaluation = evaluate_candidate_response(revision_raw, source_row["tools"])
@@ -273,7 +249,6 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             "result_summary": summarize_records(records),
         },
     )
-
 
 if __name__ == "__main__":
     main()

@@ -1,20 +1,17 @@
-from __future__ import annotations
-
 import argparse
 import os
-from typing import Any, Dict, List, Optional, Sequence
 
 from cai_stage_utils import (
     add_bool_flag,
+    add_run_mode_args,
+    count_values,
     env_flag,
     env_float,
     env_int,
     load_existing_stage_records,
-    load_selected_source_rows,
-    resolve_max_examples,
+    parse_stage_args,
+    prepare_stage_source,
     sanitized_args_dict,
-    should_enforce_strict_balance,
-    source_balance,
 )
 from cai_utils import (
     append_jsonl,
@@ -29,8 +26,7 @@ from cai_utils import (
     write_jsonl,
 )
 
-
-def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
+def parse_args(argv=None):
     parser = argparse.ArgumentParser(
         description="Generate CAI DPO response pairs for a source split.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
@@ -56,42 +52,21 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         default=env_int("PAIR_CANDIDATE_ATTEMPTS", 6),
         help="Maximum number of sampled attempts per prompt while searching for two distinct canonical responses.",
     )
-    parser.add_argument("--dry-run", action="store_true", default=env_flag("DRY_RUN", False))
-    parser.add_argument("--smoke-run", action="store_true", default=env_flag("SMOKE_RUN", False))
-    parser.add_argument("--dry-run-max-examples", type=int, default=env_int("DRY_RUN_MAX_EXAMPLES", 8))
-    parser.add_argument("--smoke-run-max-examples", type=int, default=env_int("SMOKE_RUN_MAX_EXAMPLES", 6))
+    add_run_mode_args(parser)
     add_bool_flag(parser, "--load-in-4bit", env_flag("LOAD_IN_4BIT", True), "Load model in 4-bit.")
     add_bool_flag(parser, "--trust-remote-code", env_flag("TRUST_REMOTE_CODE", False), "Allow custom model code.")
-    args = parser.parse_args(argv)
-    if args.dry_run and args.smoke_run:
-        parser.error("--dry-run and --smoke-run are mutually exclusive.")
-    return args
+    return parse_stage_args(parser, argv)
 
-
-def summarize_records(records: List[Dict[str, Any]]) -> Dict[str, Any]:
-    class_counts_a: Dict[str, int] = {}
-    class_counts_b: Dict[str, int] = {}
-    duplicate_rows = 0
-    resampled_rows = 0
-    max_sampling_attempts = 0
-    for record in records:
-        class_counts_a[record["response_a_class"]] = class_counts_a.get(record["response_a_class"], 0) + 1
-        class_counts_b[record["response_b_class"]] = class_counts_b.get(record["response_b_class"], 0) + 1
-        if record["response_a"] == record["response_b"]:
-            duplicate_rows += 1
-        if record.get("sampling_attempts", 0) > 2:
-            resampled_rows += 1
-        max_sampling_attempts = max(max_sampling_attempts, int(record.get("sampling_attempts", 0)))
+def summarize_records(records):
     return {
-        "response_a_class_counts": class_counts_a,
-        "response_b_class_counts": class_counts_b,
-        "duplicate_rows": duplicate_rows,
-        "resampled_rows": resampled_rows,
-        "max_sampling_attempts": max_sampling_attempts,
+        "response_a_class_counts": count_values(record["response_a_class"] for record in records),
+        "response_b_class_counts": count_values(record["response_b_class"] for record in records),
+        "duplicate_rows": sum(record["response_a"] == record["response_b"] for record in records),
+        "resampled_rows": sum(record.get("sampling_attempts", 0) > 2 for record in records),
+        "max_sampling_attempts": max((int(record.get("sampling_attempts", 0)) for record in records), default=0),
     }
 
-
-def build_response_pair_record(state: Dict[str, Any]) -> Dict[str, Any]:
+def build_response_pair_record(state):
     row = state["row"]
     sampled_candidates = state["sampled_candidates"]
     distinct_candidates = state["distinct_candidates"]
@@ -123,8 +98,7 @@ def build_response_pair_record(state: Dict[str, Any]) -> Dict[str, Any]:
         "response_b_structural_kind": response_b["structural_kind"],
     }
 
-
-def main(argv: Optional[Sequence[str]] = None) -> None:
+def main(argv=None):
     args = parse_args(argv)
     if args.candidate_attempts < 2:
         raise ValueError("--candidate-attempts must be at least 2.")
@@ -133,20 +107,8 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     out_dir = ensure_dir(args.output_dir)
     save_json(out_dir / "run_config.json", sanitized_args_dict(args))
 
-    max_examples = resolve_max_examples(args)
-    strict_balance = should_enforce_strict_balance(
-        dry_run=args.dry_run,
-        smoke_run=args.smoke_run,
-        start_index=args.start_index,
-        max_examples=max_examples,
-    )
-    source_rows = load_selected_source_rows(
-        source_file=args.source_file,
-        start_index=args.start_index,
-        max_examples=max_examples,
-        smoke_run=args.smoke_run and args.max_examples is None,
-    )
-    selected_balance = source_balance(source_rows, strict_balance)
+    source = prepare_stage_source(args, enforce_strict_balance=True)
+    source_rows = source.rows
 
     preview_rows = [
         {
@@ -165,7 +127,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             {
                 "mode": "dry_run",
                 "source_examples": len(source_rows),
-                "source_balance": selected_balance,
+                "source_balance": source.balance,
                 "saved_preview": str(out_dir / "prompt_previews.jsonl"),
             },
         )
@@ -192,7 +154,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             trust_remote_code=args.trust_remote_code,
         )
 
-        states: List[Dict[str, Any]] = []
+        states = []
         for idx, row in enumerate(remaining_rows):
             states.append(
                 {
@@ -239,7 +201,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
                     seed=args.seed + (attempt_idx * 100_000) + batch_start,
                     max_prompt_length=args.max_prompt_length,
                 )
-                completed_batch_records: List[Dict[str, Any]] = []
+                completed_batch_records = []
                 for state_idx, response_raw in zip(state_index_batch, raw_outputs):
                     state = states[state_idx]
                     evaluation = evaluate_candidate_response(response_raw, state["row"]["tools"])
@@ -263,7 +225,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
                         state["completed"] = True
                 append_jsonl(output_path, completed_batch_records)
 
-        trailing_records: List[Dict[str, Any]] = []
+        trailing_records = []
         for state in states:
             if state["completed"]:
                 continue
@@ -284,8 +246,8 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             "policy_family": args.policy_family,
             "source_file": args.source_file,
             "source_examples": len(source_rows),
-            "source_balance": selected_balance,
-            "strict_balance_enforced": strict_balance,
+            "source_balance": source.balance,
+            "strict_balance_enforced": source.strict_balance,
             "resumed_existing_rows": len(existing_records),
             "outputs": {
                 "response_pairs": str(output_path),
@@ -293,7 +255,6 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             "result_summary": summarize_records(records),
         },
     )
-
 
 if __name__ == "__main__":
     main()

@@ -1,20 +1,17 @@
-from __future__ import annotations
-
 import argparse
 import os
-from typing import Any, Dict, List, Optional, Sequence
 
 from cai_stage_utils import (
     add_bool_flag,
+    add_run_mode_args,
+    count_values,
     env_flag,
     env_int,
     load_existing_stage_records,
-    load_selected_source_rows,
     ordered_stage_rows,
-    resolve_max_examples,
+    parse_stage_args,
+    prepare_stage_source,
     sanitized_args_dict,
-    should_enforce_strict_balance,
-    source_balance,
 )
 from cai_utils import (
     append_jsonl,
@@ -33,8 +30,7 @@ from cai_utils import (
     write_jsonl,
 )
 
-
-def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
+def parse_args(argv=None):
     parser = argparse.ArgumentParser(
         description="Judge CAI response pairs and write the final DPO dataset.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
@@ -53,41 +49,20 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--max-new-tokens", type=int, default=env_int("JUDGE_MAX_NEW_TOKENS", 64))
     parser.add_argument("--batch-size", type=int, default=env_int("BATCH_SIZE", 2))
     parser.add_argument("--max-prompt-length", type=int, default=env_int("MAX_PROMPT_LENGTH", 1024))
-    parser.add_argument("--dry-run", action="store_true", default=env_flag("DRY_RUN", False))
-    parser.add_argument("--smoke-run", action="store_true", default=env_flag("SMOKE_RUN", False))
-    parser.add_argument("--dry-run-max-examples", type=int, default=env_int("DRY_RUN_MAX_EXAMPLES", 8))
-    parser.add_argument("--smoke-run-max-examples", type=int, default=env_int("SMOKE_RUN_MAX_EXAMPLES", 6))
+    add_run_mode_args(parser)
     add_bool_flag(parser, "--load-in-4bit", env_flag("LOAD_IN_4BIT", True), "Load model in 4-bit.")
     add_bool_flag(parser, "--trust-remote-code", env_flag("TRUST_REMOTE_CODE", False), "Allow custom model code.")
-    args = parser.parse_args(argv)
-    if args.dry_run and args.smoke_run:
-        parser.error("--dry-run and --smoke-run are mutually exclusive.")
-    return args
+    return parse_stage_args(parser, argv)
 
-
-def summarize_records(records: List[Dict[str, Any]]) -> Dict[str, Any]:
-    valid_counts: Dict[str, int] = {}
-    chosen_class_counts: Dict[str, int] = {}
-    failure_counts: Dict[str, int] = {}
-    for record in records:
-        label = record["chosen_behavior_class"]
-        if record.get("valid"):
-            valid_counts[label] = valid_counts.get(label, 0) + 1
-        chosen_class = record.get("chosen_class")
-        if chosen_class:
-            chosen_class_counts[chosen_class] = chosen_class_counts.get(chosen_class, 0) + 1
-        reason = record.get("failure_reason")
-        if reason:
-            failure_counts[reason] = failure_counts.get(reason, 0) + 1
+def summarize_records(records):
     return {
-        "valid_counts": valid_counts,
-        "chosen_class_counts": chosen_class_counts,
-        "failure_counts": failure_counts,
+        "valid_counts": count_values(record["chosen_behavior_class"] for record in records if record.get("valid")),
+        "chosen_class_counts": count_values(record["chosen_class"] for record in records if record.get("chosen_class")),
+        "failure_counts": count_values(record["failure_reason"] for record in records if record.get("failure_reason")),
     }
 
-
-def export_rows(records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    rows: List[Dict[str, Any]] = []
+def export_rows(records):
+    rows = []
     for record in records:
         if not record.get("valid"):
             continue
@@ -103,29 +78,16 @@ def export_rows(records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         )
     return rows
 
-
-def main(argv: Optional[Sequence[str]] = None) -> None:
+def main(argv=None):
     args = parse_args(argv)
     if args.batch_size < 1:
         raise ValueError("--batch-size must be at least 1.")
     out_dir = ensure_dir(args.output_dir)
     save_json(out_dir / "run_config.json", sanitized_args_dict(args))
 
-    max_examples = resolve_max_examples(args)
-    strict_balance = should_enforce_strict_balance(
-        dry_run=args.dry_run,
-        smoke_run=args.smoke_run,
-        start_index=args.start_index,
-        max_examples=max_examples,
-    )
-    source_rows = load_selected_source_rows(
-        source_file=args.source_file,
-        start_index=args.start_index,
-        max_examples=max_examples,
-        smoke_run=args.smoke_run and args.max_examples is None,
-    )
+    source = prepare_stage_source(args, enforce_strict_balance=True)
+    source_rows = source.rows
     pair_rows = ordered_stage_rows(source_rows, load_jsonl(args.response_pairs_file), "response_pairs")
-    selected_balance = source_balance(source_rows, strict_balance)
     constitution = get_constitution()
 
     preview_rows = []
@@ -152,7 +114,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             {
                 "mode": "dry_run",
                 "source_examples": len(source_rows),
-                "source_balance": selected_balance,
+                "source_balance": source.balance,
                 "saved_preview": str(out_dir / "prompt_previews.jsonl"),
             },
         )
@@ -181,7 +143,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             trust_remote_code=args.trust_remote_code,
         )
 
-        judge_tasks: List[Dict[str, Any]] = []
+        judge_tasks = []
         iterator = progress(
             remaining_indices,
             total=len(remaining_indices),
@@ -260,7 +222,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
                     }
                 )
 
-        retry_tasks: List[Dict[str, Any]] = []
+        retry_tasks = []
         generation_iterator = progress(
             range(0, len(judge_tasks), args.batch_size),
             total=(len(judge_tasks) + args.batch_size - 1) // args.batch_size if judge_tasks else 0,
@@ -280,7 +242,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
                 seed=args.seed + task_batch[0]["source_row"]["source_row_index"],
                 max_prompt_length=args.max_prompt_length,
             )
-            completed_batch_records: List[Dict[str, Any]] = []
+            completed_batch_records = []
             for task, raw_output in zip(task_batch, raw_outputs):
                 parsed = parse_preference_output(raw_output)
                 if parsed["valid"]:
@@ -331,7 +293,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
                 seed=args.seed + 1_000_000 + task_batch[0]["source_row"]["source_row_index"],
                 max_prompt_length=args.max_prompt_length,
             )
-            batch_records: List[Dict[str, Any]] = []
+            batch_records = []
             for task, raw_output in zip(task_batch, raw_outputs):
                 parsed = parse_preference_output(raw_output)
                 pair_row = task["pair_row"]
@@ -385,8 +347,8 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             "source_file": args.source_file,
             "response_pairs_file": args.response_pairs_file,
             "source_examples": len(source_rows),
-            "source_balance": selected_balance,
-            "strict_balance_enforced": strict_balance,
+            "source_balance": source.balance,
+            "strict_balance_enforced": source.strict_balance,
             "resumed_existing_rows": len(existing_records),
             "outputs": {
                 "master_records": str(master_path),
@@ -406,7 +368,6 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             f"Generated CAI DPO dataset is not fully balanced/valid. "
             f"source={selected_balance}, export={export_counts}"
         )
-
 
 if __name__ == "__main__":
     main()

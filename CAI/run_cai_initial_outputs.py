@@ -1,19 +1,17 @@
-from __future__ import annotations
-
 import argparse
 import os
-from typing import Any, Dict, List, Optional, Sequence
 
 from cai_stage_utils import (
     add_bool_flag,
+    add_run_mode_args,
+    count_values,
     env_flag,
     env_float,
     env_int,
-    load_selected_source_rows,
-    resolve_max_examples,
+    load_existing_stage_records,
+    parse_stage_args,
+    prepare_stage_source,
     sanitized_args_dict,
-    should_enforce_strict_balance,
-    source_balance,
 )
 from cai_utils import (
     append_jsonl,
@@ -22,15 +20,13 @@ from cai_utils import (
     evaluate_candidate_response,
     generate_responses,
     load_generation_model,
-    load_jsonl,
     progress,
     save_json,
     unload_model,
     write_jsonl,
 )
 
-
-def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
+def parse_args(argv=None):
     parser = argparse.ArgumentParser(
         description="Generate initial CAI policy outputs for a source split.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
@@ -50,74 +46,32 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--max-prompt-length", type=int, default=env_int("MAX_PROMPT_LENGTH", 1024))
     parser.add_argument("--temperature", type=float, default=env_float("POLICY_TEMPERATURE", 0.7))
     parser.add_argument("--top-p", type=float, default=env_float("POLICY_TOP_P", 0.95))
-    parser.add_argument("--dry-run", action="store_true", default=env_flag("DRY_RUN", False))
-    parser.add_argument("--smoke-run", action="store_true", default=env_flag("SMOKE_RUN", False))
-    parser.add_argument("--dry-run-max-examples", type=int, default=env_int("DRY_RUN_MAX_EXAMPLES", 8))
-    parser.add_argument("--smoke-run-max-examples", type=int, default=env_int("SMOKE_RUN_MAX_EXAMPLES", 6))
+    add_run_mode_args(parser)
     add_bool_flag(parser, "--load-in-4bit", env_flag("LOAD_IN_4BIT", True), "Load model in 4-bit.")
     add_bool_flag(parser, "--trust-remote-code", env_flag("TRUST_REMOTE_CODE", False), "Allow custom model code.")
-    args = parser.parse_args(argv)
-    if args.dry_run and args.smoke_run:
-        parser.error("--dry-run and --smoke-run are mutually exclusive.")
-    return args
+    return parse_stage_args(parser, argv)
 
-
-def summarize_records(records: List[Dict[str, Any]]) -> Dict[str, Any]:
-    class_counts: Dict[str, int] = {}
-    structural_kind_counts: Dict[str, int] = {}
-    validation_reason_counts: Dict[str, int] = {}
-    valid_count = 0
-    for record in records:
-        output_class = record["initial_output_class"]
-        structural_kind = record["initial_output_structural_kind"]
-        class_counts[output_class] = class_counts.get(output_class, 0) + 1
-        structural_kind_counts[structural_kind] = structural_kind_counts.get(structural_kind, 0) + 1
-        if record["initial_output_valid"]:
-            valid_count += 1
-        elif record["initial_output_validation_reason"]:
-            reason = record["initial_output_validation_reason"]
-            validation_reason_counts[reason] = validation_reason_counts.get(reason, 0) + 1
+def summarize_records(records):
     return {
-        "output_class_counts": class_counts,
-        "structural_kind_counts": structural_kind_counts,
-        "valid_rows": valid_count,
-        "invalid_reason_counts": validation_reason_counts,
+        "output_class_counts": count_values(record["initial_output_class"] for record in records),
+        "structural_kind_counts": count_values(record["initial_output_structural_kind"] for record in records),
+        "valid_rows": sum(bool(record["initial_output_valid"]) for record in records),
+        "invalid_reason_counts": count_values(
+            record["initial_output_validation_reason"]
+            for record in records
+            if not record["initial_output_valid"] and record["initial_output_validation_reason"]
+        ),
     }
 
-
-def index_records_by_example_id(records: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
-    indexed: Dict[str, Dict[str, Any]] = {}
-    for record in records:
-        example_id = record.get("example_id")
-        if not example_id:
-            raise ValueError(f"Initial output record missing example_id: {record}")
-        if example_id in indexed:
-            raise ValueError(f"Duplicate initial output record for example_id={example_id}")
-        indexed[example_id] = record
-    return indexed
-
-
-def main(argv: Optional[Sequence[str]] = None) -> None:
+def main(argv=None):
     args = parse_args(argv)
     if args.batch_size < 1:
         raise ValueError("--batch-size must be at least 1.")
     out_dir = ensure_dir(args.output_dir)
     save_json(out_dir / "run_config.json", sanitized_args_dict(args))
 
-    max_examples = resolve_max_examples(args)
-    strict_balance = should_enforce_strict_balance(
-        dry_run=args.dry_run,
-        smoke_run=args.smoke_run,
-        start_index=args.start_index,
-        max_examples=max_examples,
-    )
-    source_rows = load_selected_source_rows(
-        source_file=args.source_file,
-        start_index=args.start_index,
-        max_examples=max_examples,
-        smoke_run=args.smoke_run and args.max_examples is None,
-    )
-    selected_balance = source_balance(source_rows, strict_balance)
+    source = prepare_stage_source(args, enforce_strict_balance=True)
+    source_rows = source.rows
 
     preview_rows = [
         {
@@ -136,29 +90,16 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             {
                 "mode": "dry_run",
                 "source_examples": len(source_rows),
-                "source_balance": selected_balance,
+                "source_balance": source.balance,
                 "saved_preview": str(out_dir / "prompt_previews.jsonl"),
             },
         )
         return
 
     output_path = out_dir / "initial_outputs.jsonl"
-    existing_records: List[Dict[str, Any]] = []
+    existing_records, existing_by_id = load_existing_stage_records(output_path, source_rows, "initial_outputs")
     if output_path.exists():
-        existing_records = load_jsonl(output_path, allow_partial_last_line=True)
-        if output_path.stat().st_size > 0 and not existing_records:
-            raise RuntimeError(
-                f"Existing initial outputs file {output_path} is non-empty but no rows could be recovered. "
-                "Refusing to overwrite it automatically."
-            )
         print(f"Found existing initial outputs file at {output_path} with {len(existing_records)} parsed rows.")
-    existing_by_id = index_records_by_example_id(existing_records)
-    source_example_ids = {row["example_id"] for row in source_rows}
-    extra_ids = sorted(set(existing_by_id) - source_example_ids)
-    if extra_ids:
-        raise ValueError(
-            f"Existing initial outputs contain rows not present in the selected source set: {extra_ids[:3]}"
-        )
     remaining_rows = [row for row in source_rows if row["example_id"] not in existing_by_id]
 
     if existing_records:
@@ -200,7 +141,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
                 seed=args.seed + batch_rows[0]["source_row_index"],
                 max_prompt_length=args.max_prompt_length,
             )
-            batch_records: List[Dict[str, Any]] = []
+            batch_records = []
             for row, initial_output_raw in zip(batch_rows, initial_outputs_raw):
                 evaluation = evaluate_candidate_response(initial_output_raw, row["tools"])
                 record = {
@@ -234,8 +175,8 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             "policy_family": args.policy_family,
             "source_file": args.source_file,
             "source_examples": len(source_rows),
-            "source_balance": selected_balance,
-            "strict_balance_enforced": strict_balance,
+            "source_balance": source.balance,
+            "strict_balance_enforced": source.strict_balance,
             "resumed_existing_rows": len(existing_records),
             "outputs": {
                 "initial_outputs": str(output_path),
@@ -244,7 +185,6 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         },
     )
     print(f"Wrote initial output summary to {out_dir / 'summary.json'}.")
-
 
 if __name__ == "__main__":
     main()

@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import ast
 import copy
 import gc
@@ -8,7 +6,6 @@ import os
 import re
 import sys
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 try:
     import torch
@@ -17,11 +14,10 @@ except ImportError:
 
 try:
     from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
-except ImportError: 
+except ImportError:
     AutoModelForCausalLM = None
     AutoTokenizer = None
     BitsAndBytesConfig = None
-
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CAI_DIR = Path(__file__).resolve().parent
@@ -30,7 +26,6 @@ if str(POST_TRAINING_DIR) not in sys.path:
     sys.path.insert(0, str(POST_TRAINING_DIR))
 
 from w2c_train_format import build_training_prompt, split_context_and_target
-
 
 DEFAULT_SELF_MODELS = {
     "llama": "meta-llama/Llama-3.2-3B-Instruct",
@@ -83,14 +78,12 @@ REQUEST_PATTERNS = [
     r"\bmay i have\b",
 ]
 
-
-def ensure_dir(path: str | Path) -> Path:
+def ensure_dir(path):
     p = Path(path)
     p.mkdir(parents=True, exist_ok=True)
     return p
 
-
-def save_json(path: str | Path, payload: Dict[str, Any]) -> None:
+def save_json(path, payload):
     path_obj = Path(path)
     temp_path = path_obj.with_name(f"{path_obj.name}.{os.getpid()}.tmp")
     with temp_path.open("w", encoding="utf-8") as handle:
@@ -99,9 +92,8 @@ def save_json(path: str | Path, payload: Dict[str, Any]) -> None:
         os.fsync(handle.fileno())
     temp_path.replace(path_obj)
 
-
-def load_jsonl(path: str | Path, *, allow_partial_last_line: bool = False) -> List[Dict[str, Any]]:
-    rows: List[Dict[str, Any]] = []
+def load_jsonl(path, *, allow_partial_last_line=False):
+    rows = []
     path_obj = Path(path)
     lines = path_obj.read_text(encoding="utf-8").splitlines()
     for line_idx, line in enumerate(lines, start=1):
@@ -115,8 +107,7 @@ def load_jsonl(path: str | Path, *, allow_partial_last_line: bool = False) -> Li
                 raise
     return rows
 
-
-def write_jsonl(path: str | Path, rows: Iterable[Dict[str, Any]]) -> None:
+def write_jsonl(path, rows):
     path_obj = Path(path)
     temp_path = path_obj.with_name(f"{path_obj.name}.{os.getpid()}.tmp")
     with temp_path.open("w", encoding="utf-8") as handle:
@@ -126,8 +117,7 @@ def write_jsonl(path: str | Path, rows: Iterable[Dict[str, Any]]) -> None:
         os.fsync(handle.fileno())
     temp_path.replace(path_obj)
 
-
-def append_jsonl(path: str | Path, rows: Iterable[Dict[str, Any]]) -> None:
+def append_jsonl(path, rows):
     rows_list = list(rows)
     if not rows_list:
         return
@@ -137,8 +127,7 @@ def append_jsonl(path: str | Path, rows: Iterable[Dict[str, Any]]) -> None:
         handle.flush()
         os.fsync(handle.fileno())
 
-
-def progress(iterable: Iterable[Any], **kwargs: Any) -> Iterable[Any]:
+def progress(iterable, **kwargs):
     try:
         from tqdm.auto import tqdm
 
@@ -146,23 +135,19 @@ def progress(iterable: Iterable[Any], **kwargs: Any) -> Iterable[Any]:
     except Exception:
         return iterable
 
-
-def load_template(name: str) -> str:
+def load_template(name):
     return (CAI_DIR / name).read_text(encoding="utf-8").strip()
 
-
-def get_constitution() -> str:
+def get_constitution():
     return load_template("Constitution.txt")
 
-
-def render_template(template_text: str, **values: str) -> str:
+def render_template(template_text, **values):
     rendered = template_text
     for key, value in values.items():
         rendered = rendered.replace(f"{{{{{key}}}}}", value)
     return rendered
 
-
-def format_conversation(messages: List[Dict[str, Any]]) -> str:
+def format_conversation(messages):
     if not messages:
         return ""
     lines = []
@@ -172,8 +157,7 @@ def format_conversation(messages: List[Dict[str, Any]]) -> str:
         lines.append(f"{role}: {content}")
     return "\n".join(lines)
 
-
-def source_prompt_messages(row: Dict[str, Any]) -> List[Dict[str, Any]]:
+def source_prompt_messages(row):
     messages = row.get("messages", [])
     if not isinstance(messages, list):
         return []
@@ -186,12 +170,10 @@ def source_prompt_messages(row: Dict[str, Any]) -> List[Dict[str, Any]]:
             return copied_messages
     return copied_messages
 
-
-def source_user_request_text(row: Dict[str, Any]) -> str:
+def source_user_request_text(row):
     return format_conversation(source_prompt_messages(row))
 
-
-def serialize_tools(tools: Any) -> str:
+def serialize_tools(tools):
     if isinstance(tools, str):
         return tools
     try:
@@ -199,8 +181,7 @@ def serialize_tools(tools: Any) -> str:
     except Exception:
         return str(tools)
 
-
-def extract_toolcall_payload(text: str) -> Optional[str]:
+def extract_toolcall_payload(text):
     if not isinstance(text, str):
         return None
     match = TOOLCALL_RE.search(text)
@@ -211,15 +192,13 @@ def extract_toolcall_payload(text: str) -> Optional[str]:
         return alt_match.group(1).strip()
     return None
 
-
-def maybe_json_load(text: str) -> Any:
+def maybe_json_load(text):
     try:
         return json.loads(text.strip())
     except Exception:
         return None
 
-
-def extract_leading_json(text: str) -> Any:
+def extract_leading_json(text):
     stripped = text.strip()
     if not stripped or stripped[0] not in {"{", "["}:
         return None
@@ -230,8 +209,7 @@ def extract_leading_json(text: str) -> Any:
     except Exception:
         return None
 
-
-def _ast_literal(node: ast.AST) -> Any:
+def _ast_literal(node):
     try:
         return ast.literal_eval(node)
     except (ValueError, SyntaxError, TypeError):
@@ -259,8 +237,7 @@ def _ast_literal(node: ast.AST) -> Any:
         except Exception:
             raise
 
-
-def parse_llama_single_toolcall(text: str) -> Optional[Dict[str, Any]]:
+def parse_llama_single_toolcall(text):
     raw = text.strip()
     if not raw:
         return None
@@ -282,7 +259,7 @@ def parse_llama_single_toolcall(text: str) -> Optional[Dict[str, Any]]:
     if body.args:
         return None
 
-    arguments: Dict[str, Any] = {}
+    arguments = {}
     for keyword in body.keywords:
         if keyword.arg is None:
             return None
@@ -290,8 +267,7 @@ def parse_llama_single_toolcall(text: str) -> Optional[Dict[str, Any]]:
 
     return {"name": body.func.id, "arguments": arguments}
 
-
-def _json_safe_tool_value(value: Any) -> Any:
+def _json_safe_tool_value(value):
     if value is None or isinstance(value, (str, int, float, bool)):
         return value
     if isinstance(value, dict):
@@ -306,8 +282,7 @@ def _json_safe_tool_value(value: Any) -> Any:
         )
     return str(value)
 
-
-def normalize_tool_call(call: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+def normalize_tool_call(call):
     if not isinstance(call, dict):
         return None
     if "name" not in call:
@@ -322,8 +297,7 @@ def normalize_tool_call(call: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         "arguments": _json_safe_tool_value(args),
     }
 
-
-def parse_single_tool_call(text: str) -> Optional[Dict[str, Any]]:
+def parse_single_tool_call(text):
     try:
         if not isinstance(text, str):
             return None
@@ -351,13 +325,11 @@ def parse_single_tool_call(text: str) -> Optional[Dict[str, Any]]:
     except Exception:
         return None
 
-
-def wrap_canonical_toolcall(call: Dict[str, Any]) -> str:
+def wrap_canonical_toolcall(call):
     payload = json.dumps(call, ensure_ascii=False, separators=(",", ":"))
     return f"<TOOLCALL>{payload}</TOOLCALL>"
 
-
-def canonicalize_assistant_response(text: str) -> str:
+def canonicalize_assistant_response(text):
     if not isinstance(text, str):
         return ""
 
@@ -374,8 +346,7 @@ def canonicalize_assistant_response(text: str) -> str:
 
     return stripped
 
-
-def has_tool_call_marker(text: str) -> bool:
+def has_tool_call_marker(text):
     raw = text if isinstance(text, str) else ""
     try:
         return (
@@ -386,8 +357,7 @@ def has_tool_call_marker(text: str) -> bool:
     except Exception:
         return False
 
-
-def _recognized_type_tokens(type_text: str) -> List[str]:
+def _recognized_type_tokens(type_text):
     text = (type_text or "").lower()
     recognized = []
     for token in ["str", "string", "int", "integer", "float", "number", "bool", "boolean", "dict", "object", "list", "array"]:
@@ -395,8 +365,7 @@ def _recognized_type_tokens(type_text: str) -> List[str]:
             recognized.append(token)
     return recognized
 
-
-def _value_matches_type(value: Any, type_text: str) -> bool:
+def _value_matches_type(value, type_text):
     tokens = _recognized_type_tokens(type_text)
     if not tokens:
         return True
@@ -428,8 +397,7 @@ def _value_matches_type(value: Any, type_text: str) -> bool:
             return True
     return False
 
-
-def parse_tools_spec(tools: Any) -> Dict[str, Dict[str, Any]]:
+def parse_tools_spec(tools):
     try:
         if isinstance(tools, str):
             candidate = maybe_json_load(tools)
@@ -439,7 +407,7 @@ def parse_tools_spec(tools: Any) -> Dict[str, Dict[str, Any]]:
         else:
             tool_items = []
 
-        parsed_tools: Dict[str, Dict[str, Any]] = {}
+        parsed_tools = {}
         for item in tool_items:
             if isinstance(item, str):
                 item = maybe_json_load(item)
@@ -450,8 +418,7 @@ def parse_tools_spec(tools: Any) -> Dict[str, Dict[str, Any]]:
     except Exception:
         return {}
 
-
-def validate_single_tool_call(text: str, tools: Any) -> Dict[str, Any]:
+def validate_single_tool_call(text, tools):
     try:
         call = parse_single_tool_call(text)
         if call is None:
@@ -491,20 +458,17 @@ def validate_single_tool_call(text: str, tools: Any) -> Dict[str, Any]:
     except Exception:
         return {"valid": False, "reason": "tool_validation_error", "call": None}
 
-
-def has_cannot_answer_terms(text: str) -> bool:
+def has_cannot_answer_terms(text):
     lower = (text or "").lower()
     return any(re.search(pattern, lower) for pattern in CANNOT_PATTERNS)
 
-
-def looks_like_request_for_info(text: str) -> bool:
+def looks_like_request_for_info(text):
     lower = (text or "").lower().strip()
     if has_tool_call_marker(lower) or has_cannot_answer_terms(lower):
         return False
     return lower.endswith("?") or any(re.search(pattern, lower) for pattern in REQUEST_PATTERNS)
 
-
-def heuristic_class(text: str) -> str:
+def heuristic_class(text):
     if has_tool_call_marker(text):
         return "tool_call"
     if has_cannot_answer_terms(text):
@@ -513,23 +477,20 @@ def heuristic_class(text: str) -> str:
         return "request_for_info"
     return "other_plain_text"
 
-
-def validate_balanced_counts(rows: List[Dict[str, Any]], label_key: str) -> Dict[str, int]:
+def validate_balanced_counts(rows, label_key):
     counts = count_label_values(rows, label_key)
     if len(set(counts.values())) > 1:
         raise ValueError(f"Expected balanced counts for {label_key}, found {counts}")
     return counts
 
-
-def count_label_values(rows: List[Dict[str, Any]], label_key: str) -> Dict[str, int]:
-    counts: Dict[str, int] = {}
+def count_label_values(rows, label_key):
+    counts = {}
     for row in rows:
         label = str(row[label_key])
         counts[label] = counts.get(label, 0) + 1
     return counts
 
-
-def get_dtype(name: str) -> torch.dtype:
+def get_dtype(name):
     if torch is None:
         raise ImportError("torch is required for model generation utilities.")
     return {
@@ -538,8 +499,7 @@ def get_dtype(name: str) -> torch.dtype:
         "float32": torch.float32,
     }[name]
 
-
-def build_quant_config(load_in_4bit: bool, dtype_name: str) -> Optional[BitsAndBytesConfig]:
+def build_quant_config(load_in_4bit, dtype_name):
     if BitsAndBytesConfig is None and load_in_4bit:
         raise ImportError("transformers with bitsandbytes support is required for 4-bit loading.")
     if not load_in_4bit:
@@ -551,20 +511,18 @@ def build_quant_config(load_in_4bit: bool, dtype_name: str) -> Optional[BitsAndB
         bnb_4bit_use_double_quant=True,
     )
 
-
-def is_peft_adapter_checkpoint(path: str | Path) -> bool:
+def is_peft_adapter_checkpoint(path):
     return (Path(path) / "adapter_config.json").is_file()
-
 
 def load_generation_model(
     *,
-    model_name_or_path: str,
-    hf_token: Optional[str],
-    dtype: str,
-    attn_implementation: Optional[str],
-    load_in_4bit: bool,
-    trust_remote_code: bool,
-) -> Tuple[Any, Any]:
+    model_name_or_path,
+    hf_token,
+    dtype,
+    attn_implementation,
+    load_in_4bit,
+    trust_remote_code,
+):
     if AutoTokenizer is None or AutoModelForCausalLM is None:
         raise ImportError("transformers is required for model generation utilities.")
     tokenizer = AutoTokenizer.from_pretrained(
@@ -589,7 +547,7 @@ def load_generation_model(
     if quant_config is not None:
         model_kwargs["quantization_config"] = quant_config
 
-    def load_causal_lm(target_model_name_or_path: str, kwargs: Dict[str, Any]) -> Any:
+    def load_causal_lm(target_model_name_or_path, kwargs):
         try:
             return AutoModelForCausalLM.from_pretrained(
                 target_model_name_or_path,
@@ -636,35 +594,31 @@ def load_generation_model(
     model.eval()
     return tokenizer, model
 
-
-def unload_model(tokenizer: Any, model: Any) -> None:
+def unload_model(tokenizer, model):
     del tokenizer
     del model
     gc.collect()
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
 
-
-def _model_device(model: Any) -> torch.device:
+def _model_device(model):
     return next(model.parameters()).device
 
-
-def _prepare_inputs(tokenizer: Any, prompt: str, model_family: str, device: torch.device) -> Dict[str, torch.Tensor]:
+def _prepare_inputs(tokenizer, prompt, model_family, device):
     batch = tokenizer(prompt, return_tensors="pt", add_special_tokens=False)
     batch = {key: value.to(device) for key, value in batch.items()}
     if model_family == "gemma" and "token_type_ids" not in batch:
         batch["token_type_ids"] = torch.zeros_like(batch["input_ids"])
     return batch
 
-
 def _prepare_batched_inputs(
-    tokenizer: Any,
-    prompts: List[str],
-    model_family: str,
-    device: torch.device,
-    max_prompt_length: Optional[int] = None,
-) -> Dict[str, torch.Tensor]:
-    tokenizer_kwargs: Dict[str, Any] = {
+    tokenizer,
+    prompts,
+    model_family,
+    device,
+    max_prompt_length=None,
+):
+    tokenizer_kwargs = {
         "return_tensors": "pt",
         "add_special_tokens": False,
         "padding": True,
@@ -678,16 +632,15 @@ def _prepare_batched_inputs(
         batch["token_type_ids"] = torch.zeros_like(batch["input_ids"])
     return batch
 
-
 def _build_generation_config(
     *,
-    model: Any,
-    tokenizer: Any,
-    do_sample: bool,
-    max_new_tokens: int,
-    temperature: Optional[float],
-    top_p: Optional[float],
-) -> Any:
+    model,
+    tokenizer,
+    do_sample,
+    max_new_tokens,
+    temperature,
+    top_p,
+):
     generation_config = copy.deepcopy(model.generation_config)
     generation_config.do_sample = do_sample
     generation_config.max_new_tokens = max_new_tokens
@@ -707,20 +660,19 @@ def _build_generation_config(
             generation_config.top_k = None
     return generation_config
 
-
 def generate_responses(
     *,
-    model: Any,
-    tokenizer: Any,
-    prompts: List[str],
-    model_family: str,
-    max_new_tokens: int,
-    do_sample: bool,
-    temperature: Optional[float] = None,
-    top_p: Optional[float] = None,
-    seed: Optional[int] = None,
-    max_prompt_length: Optional[int] = None,
-) -> List[str]:
+    model,
+    tokenizer,
+    prompts,
+    model_family,
+    max_new_tokens,
+    do_sample,
+    temperature=None,
+    top_p=None,
+    seed=None,
+    max_prompt_length=None,
+):
     if not prompts:
         return []
 
@@ -750,25 +702,24 @@ def generate_responses(
     with torch.no_grad():
         generated = model.generate(**inputs, generation_config=generation_config)
 
-    outputs: List[str] = []
+    outputs = []
     for row_idx in range(len(prompts)):
         new_tokens = generated[row_idx][input_width:]
         outputs.append(tokenizer.decode(new_tokens, skip_special_tokens=True).strip())
     return outputs
 
-
 def generate_response(
     *,
-    model: Any,
-    tokenizer: Any,
-    prompt: str,
-    model_family: str,
-    max_new_tokens: int,
-    do_sample: bool,
-    temperature: Optional[float] = None,
-    top_p: Optional[float] = None,
-    seed: Optional[int] = None,
-) -> str:
+    model,
+    tokenizer,
+    prompt,
+    model_family,
+    max_new_tokens,
+    do_sample,
+    temperature=None,
+    top_p=None,
+    seed=None,
+):
     return generate_responses(
         model=model,
         tokenizer=tokenizer,
@@ -781,16 +732,14 @@ def generate_response(
         seed=seed,
     )[0]
 
-
-def build_policy_prompt(model_family: str, row: Dict[str, Any]) -> str:
+def build_policy_prompt(model_family, row):
     return build_training_prompt(
         model_family=model_family,
         tools=row["tools"],
         context_messages=source_prompt_messages(row),
     )
 
-
-def _wrap_llama_chat(user_text: str) -> str:
+def _wrap_llama_chat(user_text):
     return (
         "<|begin_of_text|>"
         "<|start_header_id|>user<|end_header_id|>\n"
@@ -799,14 +748,11 @@ def _wrap_llama_chat(user_text: str) -> str:
         "<|start_header_id|>assistant<|end_header_id|>\n"
     )
 
-
-def _wrap_gemma_chat(user_text: str) -> str:
+def _wrap_gemma_chat(user_text):
     return f"<start_of_turn>user\n{user_text}<end_of_turn>\n<start_of_turn>model\n"
 
-
-def _wrap_qwen_chat(user_text: str) -> str:
+def _wrap_qwen_chat(user_text):
     return f"<|im_start|>user\n{user_text}<|im_end|>\n<|im_start|>assistant\n"
-
 
 CHAT_TEMPLATE_FAMILIES = {"qwen", "gpt-oss", "phi", "mistral"}
 CHAT_WRAPPERS = {
@@ -816,11 +762,10 @@ CHAT_WRAPPERS = {
 }
 RAW_CHAT_FAMILIES = {"gpt-oss", "phi", "mistral"}
 
-
-def _wrap_with_tokenizer_chat_template(tokenizer: Any, user_text: str, model_family: str) -> Optional[str]:
+def _wrap_with_tokenizer_chat_template(tokenizer, user_text, model_family):
     if tokenizer is None or not hasattr(tokenizer, "apply_chat_template"):
         return None
-    template_kwargs: Dict[str, Any] = {
+    template_kwargs = {
         "tokenize": False,
         "add_generation_prompt": True,
     }
@@ -834,8 +779,7 @@ def _wrap_with_tokenizer_chat_template(tokenizer: Any, user_text: str, model_fam
     except Exception:
         return None
 
-
-def wrap_chat_prompt(model_family: str, user_text: str, tokenizer: Any = None) -> str:
+def wrap_chat_prompt(model_family, user_text, tokenizer=None):
     template_wrapped = _wrap_with_tokenizer_chat_template(tokenizer, user_text, model_family)
     if template_wrapped is not None and model_family in CHAT_TEMPLATE_FAMILIES:
         return template_wrapped
@@ -846,16 +790,15 @@ def wrap_chat_prompt(model_family: str, user_text: str, tokenizer: Any = None) -
         return user_text
     raise ValueError(f"Unsupported model_family={model_family!r}")
 
-
 def build_critique_prompt(
     *,
-    model_family: str,
-    constitution: str,
-    user_request: str,
-    tools: Any,
-    assistant_response: str,
-    tokenizer: Any = None,
-) -> str:
+    model_family,
+    constitution,
+    user_request,
+    tools,
+    assistant_response,
+    tokenizer=None,
+):
     template = load_template("critique_prompt.txt")
     prompt = render_template(
         template,
@@ -866,17 +809,16 @@ def build_critique_prompt(
     )
     return wrap_chat_prompt(model_family, prompt, tokenizer=tokenizer)
 
-
 def build_revision_prompt(
     *,
-    model_family: str,
-    constitution: str,
-    user_request: str,
-    tools: Any,
-    assistant_response: str,
-    critique_text: str,
-    tokenizer: Any = None,
-) -> str:
+    model_family,
+    constitution,
+    user_request,
+    tools,
+    assistant_response,
+    critique_text,
+    tokenizer=None,
+):
     template = load_template("revision_prompt.txt")
     prompt = render_template(
         template,
@@ -888,17 +830,16 @@ def build_revision_prompt(
     )
     return wrap_chat_prompt(model_family, prompt, tokenizer=tokenizer)
 
-
 def build_preference_prompt(
     *,
-    model_family: str,
-    constitution: str,
-    user_request: str,
-    tools: Any,
-    response_a: str,
-    response_b: str,
-    tokenizer: Any = None,
-) -> str:
+    model_family,
+    constitution,
+    user_request,
+    tools,
+    response_a,
+    response_b,
+    tokenizer=None,
+):
     template = load_template("preference_prompt.txt")
     prompt = render_template(
         template,
@@ -910,8 +851,7 @@ def build_preference_prompt(
     )
     return wrap_chat_prompt(model_family, prompt, tokenizer=tokenizer)
 
-
-def parse_critique_output(text: str) -> Dict[str, Any]:
+def parse_critique_output(text):
     raw_text = text.strip() if isinstance(text, str) else str(text).strip()
     try:
         verdict_match = VERDICT_RE.search(raw_text)
@@ -941,8 +881,7 @@ def parse_critique_output(text: str) -> Dict[str, Any]:
             "raw_text": raw_text,
         }
 
-
-def parse_preference_output(text: str) -> Dict[str, Any]:
+def parse_preference_output(text):
     raw_text = text.strip() if isinstance(text, str) else str(text).strip()
     try:
         winner_match = WINNER_RE.search(raw_text)
@@ -964,9 +903,8 @@ def parse_preference_output(text: str) -> Dict[str, Any]:
             "raw_text": raw_text,
         }
 
-
-def critique_missing_fields(parsed: Dict[str, Any]) -> List[str]:
-    missing: List[str] = []
+def critique_missing_fields(parsed):
+    missing = []
     if parsed.get("verdict") not in {"NO_ISSUES", "ISSUES"}:
         missing.append("Verdict")
     if parsed.get("primary_issue") is None:
@@ -979,8 +917,7 @@ def critique_missing_fields(parsed: Dict[str, Any]) -> List[str]:
         missing.append("Critique")
     return missing
 
-
-def build_fallback_critique_text(raw_attempts: List[str], parsed_attempts: List[Dict[str, Any]]) -> str:
+def build_fallback_critique_text(raw_attempts, parsed_attempts):
     non_empty_attempts = [text.strip() for text in raw_attempts if text and text.strip()]
     if not non_empty_attempts:
         return (
@@ -1008,8 +945,7 @@ def build_fallback_critique_text(raw_attempts: List[str], parsed_attempts: List[
         lines.append(text)
     return "\n".join(lines)
 
-
-def evaluate_candidate_response(response_text: str, tools: Any) -> Dict[str, Any]:
+def evaluate_candidate_response(response_text, tools):
     raw_text = response_text if isinstance(response_text, str) else str(response_text or "")
     fallback_canonical = raw_text.strip()
     try:
@@ -1060,5 +996,5 @@ def evaluate_candidate_response(response_text: str, tools: Any) -> Dict[str, Any
         "tool_validation": tool_validation,
     }
 
-def student_display_name(model_family: str) -> str:
+def student_display_name(model_family):
     return "Gemma" if model_family == "gemma" else "Llama"

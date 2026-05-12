@@ -1,10 +1,7 @@
-from __future__ import annotations
-
 import argparse
 import json
 import os
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from cai_utils import (
     canonicalize_assistant_response,
@@ -18,14 +15,12 @@ from cai_utils import (
     write_jsonl,
 )
 
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_DATASET_DIR = REPO_ROOT / "local_datasets"
 DEFAULT_OUTPUT_DIR = Path(__file__).resolve().parent / "generated_datasets"
 DEFAULT_SOURCE_JSONL = REPO_ROOT / "Data_Management" / "generated_datasets" / "when2call_balanced_sft.jsonl"
 
-
-def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
+def parse_args(argv=None):
     parser = argparse.ArgumentParser(
         description="Prepare balanced CAI source splits from a balanced JSONL or When2Call train_pref.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
@@ -60,12 +55,10 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     )
     return parser.parse_args(argv)
 
-
-def safe_dataset_slug(*parts: str) -> str:
+def safe_dataset_slug(*parts):
     return "__".join(part.replace("/", "__") for part in parts if part)
 
-
-def load_source_dataset(args: argparse.Namespace):
+def load_source_dataset(args):
     try:
         from datasets import load_dataset, load_from_disk
     except ImportError as exc:
@@ -95,14 +88,12 @@ def load_source_dataset(args: argparse.Namespace):
     dataset_obj.save_to_disk(str(snapshot_dir))
     return dataset_obj[args.dataset_split]
 
-
-def row_with_metadata(row: Dict[str, Any], chosen_behavior_class: str) -> Dict[str, Any]:
+def row_with_metadata(row, chosen_behavior_class):
     payload = dict(row)
     payload["chosen_behavior_class"] = chosen_behavior_class
     return payload
 
-
-def normalized_key(row: Dict[str, Any]) -> Tuple[str, str]:
+def normalized_key(row):
     user_request = ""
     messages = row.get("messages") or []
     if messages:
@@ -112,15 +103,13 @@ def normalized_key(row: Dict[str, Any]) -> Tuple[str, str]:
     tools_key = json.dumps(parsed_tools, ensure_ascii=False, sort_keys=True)
     return user_request, tools_key
 
-
-def rejected_response_is_valid_tool_call(row: Dict[str, Any]) -> bool:
+def rejected_response_is_valid_tool_call(row):
     rejected = str(row.get("rejected_response", {}).get("content", "")).strip()
     canonical = canonicalize_assistant_response(rejected)
     validation = validate_single_tool_call(canonical, row.get("tools"))
     return bool(validation.get("valid"))
 
-
-def infer_jsonl_behavior_class(row: Dict[str, Any]) -> Optional[str]:
+def infer_jsonl_behavior_class(row):
     explicit_label = row.get("chosen_behavior_class") or row.get("behavior_class")
     if isinstance(explicit_label, str) and explicit_label in {"tool_call", "request_for_info", "cannot_answer"}:
         return explicit_label
@@ -139,10 +128,9 @@ def infer_jsonl_behavior_class(row: Dict[str, Any]) -> Optional[str]:
 
     return None
 
-
-def load_jsonl_source_rows(path: Path) -> Tuple[List[Dict[str, Any]], int]:
+def load_jsonl_source_rows(path):
     rows = load_jsonl(path)
-    selected: List[Dict[str, Any]] = []
+    selected = []
     ignored = 0
     for row in rows:
         label = infer_jsonl_behavior_class(row)
@@ -152,13 +140,12 @@ def load_jsonl_source_rows(path: Path) -> Tuple[List[Dict[str, Any]], int]:
         selected.append(row_with_metadata(row, label))
     return selected, ignored
 
-
 def split_balanced_pools(
     *,
-    pools: Dict[str, List[Dict[str, Any]]],
-    seed: int,
-    per_class_total: Optional[int],
-) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], Dict[str, Dict[str, int]], int]:
+    pools,
+    seed,
+    per_class_total,
+):
     eligible_counts = {label: len(rows) for label, rows in pools.items()}
     min_count = min(eligible_counts.values())
     auto_total = min_count - (min_count % 2)
@@ -174,9 +161,9 @@ def split_balanced_pools(
         )
 
     per_half = selected_total // 2
-    selected_sft: List[Dict[str, Any]] = []
-    selected_dpo: List[Dict[str, Any]] = []
-    sampling_info: Dict[str, Dict[str, int]] = {}
+    selected_sft = []
+    selected_dpo = []
+    sampling_info = {}
 
     import random
 
@@ -198,15 +185,14 @@ def split_balanced_pools(
 
     return selected_sft, selected_dpo, sampling_info, per_half
 
-
-def main(argv: Optional[Sequence[str]] = None) -> None:
+def main(argv=None):
     args = parse_args(argv)
     output_dir = ensure_dir(args.output_dir)
     source_jsonl = Path(args.source_jsonl) if args.source_jsonl else None
 
     if source_jsonl and source_jsonl.exists():
         source_rows, ignored = load_jsonl_source_rows(source_jsonl)
-        raw_pools: Dict[str, List[Dict[str, Any]]] = {
+        raw_pools = {
             "tool_call": [],
             "request_for_info": [],
             "cannot_answer": [],
@@ -236,7 +222,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             "request_for_info": [],
             "cannot_answer": [],
         }
-        rows_by_key: Dict[Tuple[str, str], List[Dict[str, Any]]] = {}
+        rows_by_key = {}
         ignored = 0
         for row in progress(ds, total=len(ds), desc="Classifying train_pref rows", leave=False):
             label = heuristic_class(row["chosen_response"]["content"])
@@ -252,7 +238,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
 
         conflicting_key_count = 0
         conflicting_row_counts = {label: 0 for label in raw_pools}
-        conflicting_keys: set[Tuple[str, str]] = set()
+        conflicting_keys = set()
         for key, rows in rows_by_key.items():
             labels = {str(row["chosen_behavior_class"]) for row in rows}
             if len(labels) > 1:
@@ -333,7 +319,6 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         raise RuntimeError(
             f"Generated CAI split is not balanced. sft_counts={sft_counts}, dpo_counts={dpo_counts}"
         )
-
 
 if __name__ == "__main__":
     main()

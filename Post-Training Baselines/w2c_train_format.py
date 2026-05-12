@@ -1,8 +1,5 @@
-from __future__ import annotations
-
 import json
 import re
-from typing import Any, Dict, List, Optional, Tuple
 
 LLAMA_SYSTEM = (
     "You are an expert in composing functions. You are given a question and a set of possible functions.\n"
@@ -28,8 +25,7 @@ GEMMA_USER_INSTRUCTIONS = (
 
 _TOOLCALL_RE = re.compile(r"<TOOLCALL>(.*?)</TOOLCALL>", re.DOTALL)
 
-
-def normalize_tools(tools: Any) -> str:
+def normalize_tools(tools):
     if isinstance(tools, str):
         return tools
     try:
@@ -37,22 +33,19 @@ def normalize_tools(tools: Any) -> str:
     except Exception:
         return str(tools)
 
-
-def extract_toolcall_payload(text: str) -> Optional[str]:
+def extract_toolcall_payload(text):
     match = _TOOLCALL_RE.search(text)
     if not match:
         return None
     return match.group(1).strip()
 
-
-def maybe_json_load(text: str) -> Any:
+def maybe_json_load(text):
     try:
         return json.loads(text)
     except Exception:
         return text
 
-
-def python_literal(value: Any) -> str:
+def python_literal(value):
     if isinstance(value, str):
         return repr(value)
     if isinstance(value, bool):
@@ -63,8 +56,7 @@ def python_literal(value: Any) -> str:
         return str(value)
     return repr(value)
 
-
-def canonical_toolcall_to_llama(text: str) -> str:
+def canonical_toolcall_to_llama(text):
     payload = extract_toolcall_payload(text) or text.strip()
     obj = maybe_json_load(payload)
     if isinstance(obj, dict):
@@ -85,8 +77,7 @@ def canonical_toolcall_to_llama(text: str) -> str:
         rendered_calls.append(f"{call['name']}({rendered_args})")
     return "[" + ", ".join(rendered_calls) + "]"
 
-
-def canonical_toolcall_to_gemma(text: str) -> str:
+def canonical_toolcall_to_gemma(text):
     payload = extract_toolcall_payload(text) or text.strip()
     obj = maybe_json_load(payload)
 
@@ -96,14 +87,12 @@ def canonical_toolcall_to_gemma(text: str) -> str:
         return json.dumps(obj, ensure_ascii=False)
     return payload
 
-
 TOOLCALL_RENDERERS = (
     ("llama", canonical_toolcall_to_llama),
     ("gemma", canonical_toolcall_to_gemma),
 )
 
-
-def render_assistant_content_for_model(content: str, model_family: str) -> str:
+def render_assistant_content_for_model(content, model_family):
     payload = extract_toolcall_payload(content)
     if payload is None:
         return content.strip()
@@ -112,25 +101,22 @@ def render_assistant_content_for_model(content: str, model_family: str) -> str:
             return renderer(content)
     raise ValueError(f"Unsupported model_family={model_family!r}")
 
-
-def split_context_and_target(messages: List[Dict[str, str]]) -> Tuple[List[Dict[str, str]], str]:
+def split_context_and_target(messages):
     if not messages:
         raise ValueError("messages is empty")
     if messages[-1].get("role") != "assistant":
         raise ValueError("Expected last message to be assistant for SFT/preference data")
     return messages[:-1], messages[-1].get("content", "")
 
-
-def _llama_render_turn(role: str, content: str) -> str:
+def _llama_render_turn(role, content):
     return f"<|start_header_id|>{role}<|end_header_id|>\n{content}\n<|eot_id|>\n"
 
-
-def build_training_prompt(*, model_family: str, tools: Any, context_messages: List[Dict[str, str]]) -> str:
+def build_training_prompt(*, model_family, tools, context_messages):
     tools_text = normalize_tools(tools)
     model_family = model_family.lower()
 
     if model_family == "llama":
-        parts: List[str] = ["<|begin_of_text|>", _llama_render_turn("system", LLAMA_SYSTEM.rstrip())]
+        parts = ["<|begin_of_text|>", _llama_render_turn("system", LLAMA_SYSTEM.rstrip())]
         if not context_messages:
             raise ValueError("Expected at least one context message")
         first = context_messages[0]
@@ -171,15 +157,13 @@ def build_training_prompt(*, model_family: str, tools: Any, context_messages: Li
 
     raise ValueError(f"Unsupported model_family={model_family!r}")
 
-
-def format_sft_example(*, model_family: str, row: Dict[str, Any]) -> Tuple[str, str]:
+def format_sft_example(*, model_family, row):
     context_messages, target = split_context_and_target(row["messages"])
     prompt = build_training_prompt(model_family=model_family, tools=row["tools"], context_messages=context_messages)
     target_text = render_assistant_content_for_model(target, model_family)
     return prompt, target_text
 
-
-def format_pref_example(*, model_family: str, row: Dict[str, Any]) -> Tuple[str, str, str]:
+def format_pref_example(*, model_family, row):
     prompt = build_training_prompt(model_family=model_family, tools=row["tools"], context_messages=row["messages"])
     chosen = render_assistant_content_for_model(row["chosen_response"]["content"], model_family)
     rejected = render_assistant_content_for_model(row["rejected_response"]["content"], model_family)
